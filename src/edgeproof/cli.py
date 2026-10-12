@@ -78,37 +78,81 @@ def train(
     typer.echo(json.dumps(summary["test"]))
 
 
+def _measure(
+    name: str, runtime: str, precision: str, path: Path, *, threads: int, runs: int,
+    accuracy: bool, out: Path,
+) -> dict[str, Any]:  # fmt: skip
+    """One result row: latency and size on this machine, accuracy through the runtime."""
+    import platform
+
+    from edgeproof import bench as b
+    from edgeproof.export import size_mb
+
+    summary = json.loads((MODELS / f"{name}.json").read_text())
+    imgsz, task = summary["recipe"]["imgsz"], summary["recipe"]["task"]
+    row: dict[str, Any] = {"model": name, "runtime": runtime, "precision": precision,
+                           "cpu": b.cpu_name(), "arch": platform.machine().lower(),
+                           "size_mb": size_mb(path)}  # fmt: skip
+    row |= b.latency(path, runtime, imgsz, threads=threads, runs=runs)  # type: ignore[arg-type]
+    if accuracy:
+        row |= b.accuracy(path, task, YOLO_DATA, imgsz)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+    typer.echo(json.dumps(row))
+    return row
+
+
+def _imgsz(name: str) -> int:
+    return int(json.loads((MODELS / f"{name}.json").read_text())["recipe"]["imgsz"])
+
+
+Threads = Annotated[int, typer.Option(help="CPU threads per inference.")]
+Runs = Annotated[int, typer.Option(help="Timed runs per variant.")]
+SkipAccuracy = Annotated[bool, typer.Option(help="Latency only.")]
+
+
 @app.command()
 def bench(
     name: Annotated[str, typer.Option(help="Trained model, e.g. yolo26s-det-1024.")],
     runtimes: Annotated[str, typer.Option(help="Runtimes, comma-separated.")] = (
         "torch,onnxruntime,openvino"
     ),
-    threads: Annotated[int, typer.Option(help="CPU threads per inference.")] = 4,
-    runs: Annotated[int, typer.Option(help="Timed runs per variant.")] = 100,
-    skip_accuracy: Annotated[bool, typer.Option(help="Latency only.")] = False,
+    threads: Threads = 4,
+    runs: Runs = 100,
+    skip_accuracy: SkipAccuracy = False,
 ) -> None:
     """Export a trained model to each runtime and measure latency, size and accuracy on CPU."""
-    import platform
+    from edgeproof.export import export
 
-    from edgeproof import bench as b
-    from edgeproof.export import export, size_mb
-
-    summary = json.loads((MODELS / f"{name}.json").read_text())
-    imgsz, task = summary["recipe"]["imgsz"], summary["recipe"]["task"]
-    out = RESULTS / "runtimes.jsonl"
-    out.parent.mkdir(parents=True, exist_ok=True)
     for runtime in runtimes.split(","):
-        path = export(MODELS, name, runtime, imgsz)  # type: ignore[arg-type]
-        row: dict[str, Any] = {"model": name, "runtime": runtime, "precision": "fp32",
-                               "cpu": b.cpu_name(), "arch": platform.machine().lower(),
-                               "size_mb": size_mb(path)}  # fmt: skip
-        row |= b.latency(path, runtime, imgsz, threads=threads, runs=runs)  # type: ignore[arg-type]
-        if not skip_accuracy:
-            row |= b.accuracy(path, task, YOLO_DATA, imgsz)
-        with out.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(row) + "\n")
-        typer.echo(json.dumps(row))
+        path = export(MODELS, name, runtime, _imgsz(name))  # type: ignore[arg-type]
+        _measure(name, runtime, "fp32", path, threads=threads, runs=runs,
+                 accuracy=not skip_accuracy, out=RESULTS / "runtimes.jsonl")  # fmt: skip
+
+
+@app.command()
+def ptq(
+    name: Annotated[str, typer.Option(help="Trained model, e.g. yolo26s-det-1024.")],
+    runtime: Annotated[str, typer.Option(help="onnxruntime or openvino.")] = "onnxruntime",
+    method: Annotated[str, typer.Option(help="minmax|entropy|percentile or performance|mixed.")] = (
+        "minmax"
+    ),
+    per_channel: Annotated[bool, typer.Option(help="Per-channel weight scales (ORT).")] = True,
+    keep_head: Annotated[bool, typer.Option(help="Keep the detection head in float.")] = False,
+    calib: Annotated[int, typer.Option(help="Calibration images.")] = 128,
+    threads: Threads = 4,
+    runs: Runs = 100,
+    skip_accuracy: SkipAccuracy = False,
+) -> None:
+    """Quantize a trained model to INT8 after training and measure the variant."""
+    from edgeproof.quantize import PTQ, build
+
+    spec = PTQ(runtime=runtime, method=method, per_channel=per_channel,  # type: ignore[arg-type]
+               keep_head=keep_head, calib=calib)  # fmt: skip
+    path = build(MODELS, name, spec, YOLO_DATA, _imgsz(name))
+    _measure(name, runtime, spec.tag, path, threads=threads, runs=runs,
+             accuracy=not skip_accuracy, out=RESULTS / "ptq.jsonl")  # fmt: skip
 
 
 @app.command()
