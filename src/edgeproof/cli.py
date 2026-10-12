@@ -9,7 +9,7 @@ from typing import Annotated, Any
 import typer
 
 from edgeproof import __version__
-from edgeproof.config import DATA, MODELS, YOLO_DATA
+from edgeproof.config import DATA, MODELS, RESULTS, YOLO_DATA
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
@@ -76,6 +76,39 @@ def train(
     recipe = _recipe(family, size, task, imgsz, epochs, batch)
     summary = run(recipe, YOLO_DATA, MODELS, device=device, workers=workers, fraction=fraction)
     typer.echo(json.dumps(summary["test"]))
+
+
+@app.command()
+def bench(
+    name: Annotated[str, typer.Option(help="Trained model, e.g. yolo26s-det-1024.")],
+    runtimes: Annotated[str, typer.Option(help="Runtimes, comma-separated.")] = (
+        "torch,onnxruntime,openvino"
+    ),
+    threads: Annotated[int, typer.Option(help="CPU threads per inference.")] = 4,
+    runs: Annotated[int, typer.Option(help="Timed runs per variant.")] = 100,
+    skip_accuracy: Annotated[bool, typer.Option(help="Latency only.")] = False,
+) -> None:
+    """Export a trained model to each runtime and measure latency, size and accuracy on CPU."""
+    import platform
+
+    from edgeproof import bench as b
+    from edgeproof.export import export, size_mb
+
+    summary = json.loads((MODELS / f"{name}.json").read_text())
+    imgsz, task = summary["recipe"]["imgsz"], summary["recipe"]["task"]
+    out = RESULTS / "runtimes.jsonl"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    for runtime in runtimes.split(","):
+        path = export(MODELS, name, runtime, imgsz)  # type: ignore[arg-type]
+        row: dict[str, Any] = {"model": name, "runtime": runtime, "precision": "fp32",
+                               "cpu": b.cpu_name(), "arch": platform.machine().lower(),
+                               "size_mb": size_mb(path)}  # fmt: skip
+        row |= b.latency(path, runtime, imgsz, threads=threads, runs=runs)  # type: ignore[arg-type]
+        if not skip_accuracy:
+            row |= b.accuracy(path, task, YOLO_DATA, imgsz)
+        with out.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+        typer.echo(json.dumps(row))
 
 
 @app.command()
