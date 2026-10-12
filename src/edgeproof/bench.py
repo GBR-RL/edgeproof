@@ -41,7 +41,7 @@ def _runner(path: Path, runtime: Runtime, imgsz: int, threads: int) -> Callable[
         request = compiled.create_infer_request()
         return lambda: request.infer({0: x})
     import torch
-    from ultralytics import YOLO  # type: ignore[attr-defined]
+    from ultralytics import YOLO  # type: ignore[attr-defined,unused-ignore]
 
     torch.set_num_threads(threads)
     net: Any = YOLO(str(path)).model
@@ -81,7 +81,7 @@ def accuracy(
 ) -> dict[str, Any]:
     """Test-split mAP plus image-level recall at fixed false-alarm rates, through the runtime
     itself, and the median pre- and post-processing time per image."""
-    from ultralytics import YOLO  # type: ignore[attr-defined]
+    from ultralytics import YOLO  # type: ignore[attr-defined,unused-ignore]
 
     from edgeproof.train import metrics_from
 

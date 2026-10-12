@@ -35,7 +35,7 @@ def export(models: Path, name: str, runtime: Runtime, imgsz: int) -> Path:
         shutil.copy2(models / f"{name}.pt", source)  # Ultralytics writes exports next to the input
     if runtime == "torch":
         return source
-    from ultralytics import YOLO  # type: ignore[attr-defined]
+    from ultralytics import YOLO  # type: ignore[attr-defined,unused-ignore]
 
     # nms=False keeps an end-to-end head where the model has one (YOLO26); the Ultralytics
     # default would export the NMS head instead and hand NMS back to the CPU.
