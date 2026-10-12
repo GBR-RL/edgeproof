@@ -13,6 +13,8 @@ source "$BASE/venv/bin/activate"
 export EDGEPROOF_ROOT="$BASE" YOLO_OFFLINE=1
 cd "$BASE"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+# Stop within seconds if torch cannot use the GPU, instead of training on the CPU on GPU quota.
+python -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 3)"
 # Data on the node-local disk: thousands of small reads are slow on the shared file system.
 LOCAL="${TMPDIR:-/tmp}/edgeproof-data"
 mkdir -p "$LOCAL"
