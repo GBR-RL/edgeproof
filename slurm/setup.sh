@@ -8,7 +8,7 @@ cd "$BASE/repo"
 [ -d "$BASE/venv" ] || python -m venv "$BASE/venv"
 source "$BASE/venv/bin/activate"
 pip install -q --upgrade pip
-pip install -q -e . "ultralytics>=8.4" "onnx>=1.16" "onnxruntime>=1.18"
+pip install -q -e ".[train,runtimes]"
 export EDGEPROOF_ROOT="$BASE"
 cd "$BASE"  # Ultralytics keeps its AMP check model in ./weights
 edgeproof prefetch --families yolo26,yolo11 --sizes s

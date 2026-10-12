@@ -102,7 +102,7 @@ def train(
 ) -> dict[str, Any]:
     """Trains one recipe, keeps the best checkpoint as ``models/<name>.pt`` and scores it on
     the held-out test split. Returns the summary also written to ``models/<name>.json``."""
-    from ultralytics import YOLO  # type: ignore[attr-defined]
+    from ultralytics import YOLO  # type: ignore[attr-defined,unused-ignore]
 
     device = pick_device(device)
     start = models / "pretrained" / recipe.weights
@@ -128,7 +128,7 @@ def train(
 def evaluate(
     weights: Path, data_yaml: Path, imgsz: int, device: str | None = None, split: str = "test"
 ) -> dict[str, float]:
-    from ultralytics import YOLO  # type: ignore[attr-defined]
+    from ultralytics import YOLO  # type: ignore[attr-defined,unused-ignore]
 
     model = YOLO(str(weights))
     result = model.val(
