@@ -28,3 +28,4 @@ Thumbs.db
 *.engine
 *.xml
 *.bin
+/weights/
