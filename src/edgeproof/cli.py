@@ -170,6 +170,22 @@ def ptq(
 
 
 @app.command()
+def report(
+    accuracy: Annotated[Path, typer.Option(help="Accuracy rows (JSON lines).")] = (
+        RESULTS / "accuracy.jsonl"
+    ),
+    latency: Annotated[Path, typer.Option(help="Whole-node latency rows (JSON lines).")] = (
+        RESULTS / "latency.jsonl"
+    ),
+) -> None:
+    """Print the FP32 and INT8 result tables as Markdown."""
+    from edgeproof import report as r
+
+    rows = r.join(r.load(accuracy), r.load(latency) if latency.exists() else [])
+    typer.echo(r.fp32_table(rows) + "\n\n" + r.int8_table(rows))
+
+
+@app.command()
 def version() -> None:
     """Print the package version."""
     typer.echo(__version__)
