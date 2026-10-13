@@ -118,6 +118,7 @@ Threads = Annotated[int, typer.Option(help="CPU threads per inference.")]
 Runs = Annotated[int, typer.Option(help="Timed runs per variant.")]
 SkipAccuracy = Annotated[bool, typer.Option(help="Latency only.")]
 HeadOpt = Annotated[str, typer.Option(help="e2e (NMS-free, YOLO26 only) or nms.")]
+Out = Annotated[Path | None, typer.Option(help="Result file (JSON lines), appended to.")]
 
 
 @app.command()
@@ -130,6 +131,7 @@ def bench(
     threads: Threads = 4,
     runs: Runs = 100,
     skip_accuracy: SkipAccuracy = False,
+    out: Out = None,
 ) -> None:
     """Export a trained model to each runtime and measure latency, size and accuracy on CPU."""
     from edgeproof.export import export
@@ -138,7 +140,7 @@ def bench(
     for runtime in runtimes.split(","):
         path = export(MODELS, name, runtime, _imgsz(name), head)  # type: ignore[arg-type]
         _measure(name, runtime, "fp32", path, head=head, threads=threads, runs=runs,
-                 accuracy=not skip_accuracy, out=RESULTS / "runtimes.jsonl")  # fmt: skip
+                 accuracy=not skip_accuracy, out=out or RESULTS / "runtimes.jsonl")  # fmt: skip
 
 
 @app.command()
@@ -155,6 +157,7 @@ def ptq(
     threads: Threads = 4,
     runs: Runs = 100,
     skip_accuracy: SkipAccuracy = False,
+    out: Out = None,
 ) -> None:
     """Quantize a trained model to INT8 after training and measure the variant."""
     from edgeproof.quantize import PTQ, build
@@ -163,7 +166,7 @@ def ptq(
                keep_head=keep_head, calib=calib, head=_head(name, head))  # fmt: skip
     path = build(MODELS, name, spec, YOLO_DATA, _imgsz(name))
     _measure(name, runtime, spec.tag, path, head=spec.head, threads=threads, runs=runs,
-             accuracy=not skip_accuracy, out=RESULTS / "ptq.jsonl")  # fmt: skip
+             accuracy=not skip_accuracy, out=out or RESULTS / "ptq.jsonl")  # fmt: skip
 
 
 @app.command()
