@@ -20,8 +20,8 @@ import random
 import re
 import shutil
 import tempfile
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -107,20 +107,31 @@ def head_nodes(ops: Sequence[tuple[str, str]]) -> list[str]:
 CHUNK = 8  # calibration images whose intermediate tensors are held in memory at once
 
 
+def chunks(get_next: Callable[[], Any], n: int) -> Iterator[list[Any]]:
+    """Successive lists of up to ``n`` items from a reader that returns None when it is done."""
+    items = iter(get_next, None)
+    while chunk := list(itertools.islice(items, n)):
+        yield chunk
+
+
 @contextmanager
-def _histograms_in_chunks(reader_type: Any) -> Iterator[None]:
-    """ONNX Runtime's entropy and percentile calibrators keep every intermediate tensor of every
-    calibration image before building histograms: tens of GB at 1024 pixels. Their histogram
-    collector accumulates across calls, so the images are fed a few at a time instead."""
+def _calibrate_in_chunks(reader_type: Any) -> Iterator[None]:
+    """ONNX Runtime's calibrators keep every intermediate tensor of every calibration image before
+    computing ranges or histograms: well over 100 GB for 128 images at 1024 pixels. Both the
+    min-max ranges and the histograms merge across calls, so the images are fed a few at a time.
+    (Min-max has an option for this, CalibMaxIntermediateOutputs, but in ONNX Runtime 1.31 it
+    drops each full chunk without computing its ranges.)"""
     from onnxruntime.quantization import calibrate
 
-    original = calibrate.HistogramCalibrater.collect_data
+    with ExitStack() as stack:
+        for cls in (calibrate.MinMaxCalibrater, calibrate.HistogramCalibrater):
+            original = cls.collect_data
 
-    def chunked(self: Any, reader: Any) -> None:
-        while chunk := list(itertools.islice(iter(reader.get_next, None), CHUNK)):
-            original(self, reader_type(x[next(iter(x))] for x in chunk))
+            def chunked(self: Any, reader: Any, original: Any = original) -> None:
+                for chunk in chunks(reader.get_next, CHUNK):
+                    original(self, reader_type(x[next(iter(x))] for x in chunk))
 
-    with patch.object(calibrate.HistogramCalibrater, "collect_data", chunked):
+            stack.enter_context(patch.object(cls, "collect_data", chunked))
         yield
 
 
@@ -151,7 +162,7 @@ def quantize_onnx(source: Path, target: Path, ptq: PTQ, calib: Sequence[Path], i
     target.parent.mkdir(parents=True, exist_ok=True)
     # ONNX Runtime writes a shape-inferred copy next to the model it quantizes and deletes it
     # afterwards, so variants quantized in parallel from one export would delete each other's.
-    with tempfile.TemporaryDirectory() as tmp, _histograms_in_chunks(Reader):
+    with tempfile.TemporaryDirectory() as tmp, _calibrate_in_chunks(Reader):
         own = shutil.copy2(source, Path(tmp) / source.name)
         quantize_static(
             str(own), str(target), Reader(tensors(calib, imgsz)),
@@ -161,8 +172,6 @@ def quantize_onnx(source: Path, target: Path, ptq: PTQ, calib: Sequence[Path], i
             weight_type=QuantType.QInt8,
             calibrate_method=methods[ptq.method],
             nodes_to_exclude=exclude,
-            # Min-max otherwise also keeps every intermediate tensor until the end.
-            extra_options={"CalibMaxIntermediateOutputs": CHUNK},
         )  # fmt: skip
     # Ultralytics reads task, stride, image size and the end-to-end flag from the metadata.
     quantized = onnx.load(str(target))
