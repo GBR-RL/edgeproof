@@ -29,6 +29,7 @@ from unittest.mock import patch
 import numpy as np
 
 from edgeproof.config import SEED
+from edgeproof.export import Head, artifact
 
 PAD = 114  # Ultralytics' letterbox gray
 
@@ -40,6 +41,7 @@ class PTQ:
     per_channel: bool = True
     keep_head: bool = False
     calib: int = 128
+    head: Head = "e2e"  # which detection head is exported, not whether it is quantized
 
     def __post_init__(self) -> None:
         allowed = {"onnxruntime": ("minmax", "entropy", "percentile"),
@@ -50,8 +52,8 @@ class PTQ:
     @property
     def tag(self) -> str:
         channel = ("-pc" if self.per_channel else "-pt") if self.runtime == "onnxruntime" else ""
-        head = "headfp" if self.keep_head else "full"
-        return f"int8-{self.method}{channel}-{head}-c{self.calib}"
+        scope = "headfp" if self.keep_head else "full"
+        return f"int8-{self.method}{channel}-{scope}-c{self.calib}"
 
 
 def letterbox(image: np.ndarray, imgsz: int) -> np.ndarray:
@@ -190,7 +192,7 @@ def quantize_openvino(
 
 
 def variant_path(models: Path, name: str, ptq: PTQ) -> Path:
-    folder = models / "exported" / name / "ptq"
+    folder = artifact(models, name, "torch", ptq.head).parent / "ptq"
     if ptq.runtime == "onnxruntime":
         return folder / f"{name}-{ptq.tag}.onnx"
     return folder / f"{name}-{ptq.tag}_openvino_model"
@@ -203,7 +205,7 @@ def build(models: Path, name: str, ptq: PTQ, yolo_dir: Path, imgsz: int) -> Path
     target = variant_path(models, name, ptq)
     if target.exists():
         return target
-    source = export(models, name, ptq.runtime, imgsz)
+    source = export(models, name, ptq.runtime, imgsz, ptq.head)
     calib = calibration_images(yolo_dir, ptq.calib)
     if ptq.runtime == "onnxruntime":
         return quantize_onnx(source, target, ptq, calib, imgsz)

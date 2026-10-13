@@ -68,3 +68,6 @@ def test_variant_paths_per_runtime(tmp_path: Path) -> None:
     assert variant_path(tmp_path, "m", PTQ(runtime="openvino", method="performance")) == (
         folder / "m-int8-performance-full-c128_openvino_model"
     )
+    assert variant_path(tmp_path, "m", PTQ(head="nms")) == (
+        folder.parent / "nms" / "ptq" / "m-int8-minmax-pc-full-c128.onnx"
+    )
