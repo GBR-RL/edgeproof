@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Latency of every model, head and runtime on one whole CPU node, so no other job shares its
-# memory bandwidth or caches; accuracy comes from bench.sbatch. A whole node bills all 96 cores,
+# memory bandwidth or caches; accuracy comes from cpu.sbatch. A whole node bills all 96 cores,
 # so this job measures latency only and stays short.
 # Usage: sbatch --output=... slurm/latency.sbatch <out file> <model>:<head> [...]
 #SBATCH --job-name=edgeproof-latency

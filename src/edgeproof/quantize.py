@@ -103,7 +103,7 @@ def head_nodes(ops: Sequence[tuple[str, str]]) -> list[str]:
     return [name for name, kind in ops if kind == "Sigmoid" or scope.search(name)]
 
 
-CHUNK = 8  # calibration images held in memory at once by the histogram methods
+CHUNK = 8  # calibration images whose intermediate tensors are held in memory at once
 
 
 @contextmanager
@@ -157,6 +157,8 @@ def quantize_onnx(source: Path, target: Path, ptq: PTQ, calib: Sequence[Path], i
             weight_type=QuantType.QInt8,
             calibrate_method=methods[ptq.method],
             nodes_to_exclude=exclude,
+            # Min-max otherwise also keeps every intermediate tensor until the end.
+            extra_options={"CalibMaxIntermediateOutputs": CHUNK},
         )  # fmt: skip
     # Ultralytics reads task, stride, image size and the end-to-end flag from the metadata.
     quantized = onnx.load(str(target))
