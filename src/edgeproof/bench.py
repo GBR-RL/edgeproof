@@ -15,13 +15,15 @@ from typing import Any
 
 import numpy as np
 
-from edgeproof.export import Runtime
+from edgeproof.export import Head, Runtime
 from edgeproof.metrics import recall_at_far
 
 FARS = (0.01, 0.05)
 
 
-def _runner(path: Path, runtime: Runtime, imgsz: int, threads: int) -> Callable[[], Any]:
+def _runner(
+    path: Path, runtime: Runtime, imgsz: int, threads: int, head: Head
+) -> Callable[[], Any]:
     x = np.random.default_rng(0).random((1, 3, imgsz, imgsz), dtype=np.float32)
     if runtime == "onnxruntime":
         import onnxruntime as ort
@@ -45,6 +47,7 @@ def _runner(path: Path, runtime: Runtime, imgsz: int, threads: int) -> Callable[
 
     torch.set_num_threads(threads)
     net: Any = YOLO(str(path)).model
+    net.end2end = head == "e2e"  # before fusing, which drops the other head
     net = net.fuse().float().eval()  # conv+batch-norm folded, as every export does
     tensor = torch.from_numpy(x)
 
@@ -56,10 +59,11 @@ def _runner(path: Path, runtime: Runtime, imgsz: int, threads: int) -> Callable[
 
 
 def latency(
-    path: Path, runtime: Runtime, imgsz: int, *, threads: int = 4, runs: int = 100, warmup: int = 10
-) -> dict[str, float]:
+    path: Path, runtime: Runtime, imgsz: int, *, head: Head = "e2e", threads: int = 4,
+    runs: int = 100, warmup: int = 10,
+) -> dict[str, float]:  # fmt: skip
     """Milliseconds per image for the network alone, batch 1."""
-    run = _runner(path, runtime, imgsz, threads)
+    run = _runner(path, runtime, imgsz, threads, head)
     for _ in range(warmup):
         run()
     times = []
@@ -77,8 +81,9 @@ def latency(
 
 
 def accuracy(
-    path: Path, task: str, yolo_dir: Path, imgsz: int, fars: tuple[float, ...] = FARS
-) -> dict[str, Any]:
+    path: Path, task: str, yolo_dir: Path, imgsz: int, *, head: Head = "e2e",
+    fars: tuple[float, ...] = FARS,
+) -> dict[str, Any]:  # fmt: skip
     """Test-split mAP plus image-level recall at fixed false-alarm rates, through the runtime
     itself, and the median pre- and post-processing time per image."""
     from ultralytics import YOLO  # type: ignore[attr-defined,unused-ignore]
@@ -86,9 +91,10 @@ def accuracy(
     from edgeproof.train import metrics_from
 
     model: Any = YOLO(str(path), task=task)  # Ultralytics' result types are loose unions
+    nms = False if head == "e2e" else None  # None: Ultralytics' default, the NMS head
     result = model.val(
         data=str(yolo_dir / task / "data.yaml"), split="test", imgsz=imgsz, batch=1,
-        device="cpu", plots=False, verbose=False,
+        device="cpu", nms=nms, plots=False, verbose=False,
     )  # fmt: skip
     out: dict[str, Any] = metrics_from(result.results_dict)
     defects: list[float] = []
@@ -98,7 +104,7 @@ def accuracy(
     # A folder, not a list of paths: Ultralytics runs a list as one batch, all test images at once.
     images = yolo_dir / task / "images" / "test"
     for r in model.predict(str(images), imgsz=imgsz, batch=1, conf=0.001, device="cpu",
-                           stream=True, verbose=False):  # fmt: skip
+                           nms=nms, stream=True, verbose=False):  # fmt: skip
         score = float(r.boxes.conf.max()) if len(r.boxes) else 0.0
         (defects if "_defect_" in Path(r.path).name else normals).append(score)
         pre.append(r.speed["preprocess"])

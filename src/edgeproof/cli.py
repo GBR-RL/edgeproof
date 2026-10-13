@@ -79,7 +79,7 @@ def train(
 
 
 def _measure(
-    name: str, runtime: str, precision: str, path: Path, *, threads: int, runs: int,
+    name: str, runtime: str, precision: str, path: Path, *, head: str, threads: int, runs: int,
     accuracy: bool, out: Path,
 ) -> dict[str, Any]:  # fmt: skip
     """One result row: latency and size on this machine, accuracy through the runtime."""
@@ -90,12 +90,13 @@ def _measure(
 
     summary = json.loads((MODELS / f"{name}.json").read_text())
     imgsz, task = summary["recipe"]["imgsz"], summary["recipe"]["task"]
-    row: dict[str, Any] = {"model": name, "runtime": runtime, "precision": precision,
-                           "cpu": b.cpu_name(), "arch": platform.machine().lower(),
+    row: dict[str, Any] = {"model": name, "head": head, "runtime": runtime,
+                           "precision": precision, "cpu": b.cpu_name(),
+                           "arch": platform.machine().lower(),
                            "size_mb": size_mb(path)}  # fmt: skip
-    row |= b.latency(path, runtime, imgsz, threads=threads, runs=runs)  # type: ignore[arg-type]
+    row |= b.latency(path, runtime, imgsz, head=head, threads=threads, runs=runs)  # type: ignore[arg-type]
     if accuracy:
-        row |= b.accuracy(path, task, YOLO_DATA, imgsz)
+        row |= b.accuracy(path, task, YOLO_DATA, imgsz, head=head)  # type: ignore[arg-type]
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")
@@ -107,9 +108,16 @@ def _imgsz(name: str) -> int:
     return int(json.loads((MODELS / f"{name}.json").read_text())["recipe"]["imgsz"])
 
 
+def _head(name: str, head: str) -> Any:
+    from edgeproof.export import resolve_head
+
+    return resolve_head(MODELS / f"{name}.pt", head)  # type: ignore[arg-type]
+
+
 Threads = Annotated[int, typer.Option(help="CPU threads per inference.")]
 Runs = Annotated[int, typer.Option(help="Timed runs per variant.")]
 SkipAccuracy = Annotated[bool, typer.Option(help="Latency only.")]
+HeadOpt = Annotated[str, typer.Option(help="e2e (NMS-free, YOLO26 only) or nms.")]
 
 
 @app.command()
@@ -118,6 +126,7 @@ def bench(
     runtimes: Annotated[str, typer.Option(help="Runtimes, comma-separated.")] = (
         "torch,onnxruntime,openvino"
     ),
+    head: HeadOpt = "e2e",
     threads: Threads = 4,
     runs: Runs = 100,
     skip_accuracy: SkipAccuracy = False,
@@ -125,9 +134,10 @@ def bench(
     """Export a trained model to each runtime and measure latency, size and accuracy on CPU."""
     from edgeproof.export import export
 
+    head = _head(name, head)
     for runtime in runtimes.split(","):
-        path = export(MODELS, name, runtime, _imgsz(name))  # type: ignore[arg-type]
-        _measure(name, runtime, "fp32", path, threads=threads, runs=runs,
+        path = export(MODELS, name, runtime, _imgsz(name), head)  # type: ignore[arg-type]
+        _measure(name, runtime, "fp32", path, head=head, threads=threads, runs=runs,
                  accuracy=not skip_accuracy, out=RESULTS / "runtimes.jsonl")  # fmt: skip
 
 
@@ -141,6 +151,7 @@ def ptq(
     per_channel: Annotated[bool, typer.Option(help="Per-channel weight scales (ORT).")] = True,
     keep_head: Annotated[bool, typer.Option(help="Keep the detection head in float.")] = False,
     calib: Annotated[int, typer.Option(help="Calibration images.")] = 128,
+    head: HeadOpt = "e2e",
     threads: Threads = 4,
     runs: Runs = 100,
     skip_accuracy: SkipAccuracy = False,
@@ -149,9 +160,9 @@ def ptq(
     from edgeproof.quantize import PTQ, build
 
     spec = PTQ(runtime=runtime, method=method, per_channel=per_channel,  # type: ignore[arg-type]
-               keep_head=keep_head, calib=calib)  # fmt: skip
+               keep_head=keep_head, calib=calib, head=_head(name, head))  # fmt: skip
     path = build(MODELS, name, spec, YOLO_DATA, _imgsz(name))
-    _measure(name, runtime, spec.tag, path, threads=threads, runs=runs,
+    _measure(name, runtime, spec.tag, path, head=spec.head, threads=threads, runs=runs,
              accuracy=not skip_accuracy, out=RESULTS / "ptq.jsonl")  # fmt: skip
 
 

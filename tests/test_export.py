@@ -10,6 +10,13 @@ def test_artifact_paths_per_runtime(tmp_path: Path) -> None:
     assert artifact(tmp_path, "m", "openvino") == folder / "m_openvino_model"
 
 
+def test_nms_head_exports_live_apart(tmp_path: Path) -> None:
+    # Ultralytics writes exports next to the checkpoint, so each head gets its own copy.
+    folder = tmp_path / "exported" / "m" / "nms"
+    assert artifact(tmp_path, "m", "torch", "nms") == folder / "m.pt"
+    assert artifact(tmp_path, "m", "onnxruntime", "nms") == folder / "m.onnx"
+
+
 def test_size_counts_weights_only(tmp_path: Path) -> None:
     ir = tmp_path / "m_openvino_model"
     ir.mkdir()
