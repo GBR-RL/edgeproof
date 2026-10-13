@@ -48,7 +48,10 @@ def _ms(value: float | None) -> str:
 
 
 def _delta(value: float, base: float | None) -> str:
-    return f"{value:.3f}" if base is None else f"{value:.3f} ({value - base:+.3f})"
+    if base is None:
+        return f"{value:.3f}"
+    d = value - base
+    return f"{value:.3f} ({0.0 if abs(d) < 5e-4 else d:+.3f})"  # no "-0.000"
 
 
 def fp32_table(rows: list[Row]) -> str:

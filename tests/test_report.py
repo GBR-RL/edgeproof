@@ -45,3 +45,8 @@ def test_tag_parses_every_ptq_variant() -> None:
         "method": "entropy", "channel": "pt", "scope": "headfp", "n": "32",
     }  # fmt: skip
     assert TAG.fullmatch("int8-mixed-full-c128")["channel"] is None  # type: ignore[index]
+
+
+def test_rounding_to_zero_has_no_sign_flip() -> None:
+    rows = [_row("fp32", box_map50=0.41509), _row("int8-performance-full-c128", box_map50=0.41491)]
+    assert "0.415 (+0.000)" in int8_table(rows)
