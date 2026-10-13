@@ -1,0 +1,35 @@
+# Every measured variant, one edgeproof command per line (read by latency.sbatch).
+
+# FP32 on PyTorch, ONNX Runtime and OpenVINO
+bench --name yolo26s-det-1024 --head e2e
+bench --name yolo26s-det-1024 --head nms
+bench --name yolo11s-det-1024 --head nms
+bench --name yolo26s-seg-1024 --head e2e
+bench --name yolo26s-seg-1024 --head nms
+bench --name yolo11s-seg-1024 --head nms
+
+# INT8 after training, 128 calibration images
+ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method minmax
+ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method minmax --keep-head
+ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method minmax --no-per-channel
+ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method minmax --no-per-channel --keep-head
+ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method entropy
+ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method entropy --keep-head
+ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method percentile
+ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method percentile --keep-head
+ptq --name yolo26s-det-1024 --head e2e --runtime openvino --method performance
+ptq --name yolo26s-det-1024 --head e2e --runtime openvino --method performance --keep-head
+ptq --name yolo26s-det-1024 --head e2e --runtime openvino --method mixed
+ptq --name yolo26s-det-1024 --head e2e --runtime openvino --method mixed --keep-head
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method minmax
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method minmax --keep-head
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method minmax --no-per-channel
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method minmax --no-per-channel --keep-head
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method entropy
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method entropy --keep-head
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method percentile
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method percentile --keep-head
+ptq --name yolo11s-det-1024 --head nms --runtime openvino --method performance
+ptq --name yolo11s-det-1024 --head nms --runtime openvino --method performance --keep-head
+ptq --name yolo11s-det-1024 --head nms --runtime openvino --method mixed
+ptq --name yolo11s-det-1024 --head nms --runtime openvino --method mixed --keep-head
