@@ -53,6 +53,9 @@ def pinned(threads: int) -> Iterator[None]:
                 if sess_options is None:
                     sess_options = ort.SessionOptions()
                     sess_options.intra_op_num_threads = threads
+                    # Idle workers otherwise spin between runs and starve the pre- and
+                    # post-processing, which share the same cores.
+                    sess_options.add_session_config_entry("session.intra_op.allow_spinning", "0")
                 return session(path, sess_options, *args, **kwargs)
 
             stack.enter_context(patch.object(ort, "InferenceSession", ort_session))
