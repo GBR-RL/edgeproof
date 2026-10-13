@@ -19,6 +19,7 @@ import itertools
 import random
 import re
 import shutil
+import tempfile
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -148,9 +149,12 @@ def quantize_onnx(source: Path, target: Path, ptq: PTQ, calib: Sequence[Path], i
     methods = {"minmax": CalibrationMethod.MinMax, "entropy": CalibrationMethod.Entropy,
                "percentile": CalibrationMethod.Percentile}  # fmt: skip
     target.parent.mkdir(parents=True, exist_ok=True)
-    with _histograms_in_chunks(Reader):
+    # ONNX Runtime writes a shape-inferred copy next to the model it quantizes and deletes it
+    # afterwards, so variants quantized in parallel from one export would delete each other's.
+    with tempfile.TemporaryDirectory() as tmp, _histograms_in_chunks(Reader):
+        own = shutil.copy2(source, Path(tmp) / source.name)
         quantize_static(
-            str(source), str(target), Reader(tensors(calib, imgsz)),
+            str(own), str(target), Reader(tensors(calib, imgsz)),
             quant_format=QuantFormat.QDQ,
             per_channel=ptq.per_channel,
             activation_type=QuantType.QUInt8,
