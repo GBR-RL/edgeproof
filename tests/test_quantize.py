@@ -3,7 +3,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from edgeproof.quantize import PAD, PTQ, calibration_images, head_nodes, letterbox, variant_path
+from edgeproof.quantize import (
+    PAD,
+    PTQ,
+    calibration_images,
+    chunks,
+    head_nodes,
+    letterbox,
+    variant_path,
+)
 
 
 def test_tag_names_every_choice() -> None:
@@ -71,3 +79,11 @@ def test_variant_paths_per_runtime(tmp_path: Path) -> None:
     assert variant_path(tmp_path, "m", PTQ(head="nms")) == (
         folder.parent / "nms" / "ptq" / "m-int8-minmax-pc-full-c128.onnx"
     )
+
+
+@pytest.mark.parametrize(("n", "sizes"), [(20, [8, 8, 4]), (16, [8, 8]), (3, [3]), (0, [])])
+def test_chunks_cover_every_item_once(n: int, sizes: list[int]) -> None:
+    items = iter(range(n))
+    out = list(chunks(lambda: next(items, None), 8))
+    assert [len(c) for c in out] == sizes
+    assert [x for c in out for x in c] == list(range(n))
