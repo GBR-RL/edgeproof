@@ -10,6 +10,12 @@ from edgeproof.bench import ov_config, pinned
 class _Options:
     intra_op_num_threads = 0
 
+    def __init__(self) -> None:
+        self.config: dict[str, str] = {}
+
+    def add_session_config_entry(self, key: str, value: str) -> None:
+        self.config[key] = value
+
 
 def _fake_runtimes(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any]:
     """Stand-ins with the call signatures Ultralytics uses, so the test needs neither runtime."""
@@ -35,6 +41,7 @@ def test_pinned_sets_threads_and_fp32(monkeypatch: pytest.MonkeyPatch) -> None:
         options = ort.InferenceSession("m.onnx", providers=["CPUExecutionProvider"])
         config = ov.Core().compile_model("m.xml", "CPU", config={"PERFORMANCE_HINT": "LATENCY"})
     assert options.intra_op_num_threads == 8
+    assert options.config == {"session.intra_op.allow_spinning": "0"}
     assert config == {"PERFORMANCE_HINT": "LATENCY", **ov_config(8)}
     assert config["INFERENCE_PRECISION_HINT"] == "f32"
 
