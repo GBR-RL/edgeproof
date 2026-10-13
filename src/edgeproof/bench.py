@@ -95,8 +95,9 @@ def accuracy(
     normals: list[float] = []
     pre: list[float] = []
     post: list[float] = []
-    images = sorted((yolo_dir / task / "images" / "test").iterdir())
-    for r in model.predict([str(p) for p in images], imgsz=imgsz, conf=0.001, device="cpu",
+    # A folder, not a list of paths: Ultralytics runs a list as one batch, all test images at once.
+    images = yolo_dir / task / "images" / "test"
+    for r in model.predict(str(images), imgsz=imgsz, batch=1, conf=0.001, device="cpu",
                            stream=True, verbose=False):  # fmt: skip
         score = float(r.boxes.conf.max()) if len(r.boxes) else 0.0
         (defects if "_defect_" in Path(r.path).name else normals).append(score)
