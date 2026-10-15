@@ -85,7 +85,32 @@ All 18 FP32, 6 BF16 and 49 INT8 variants, segmentation included, are in
   above scores 0.008 higher only because Ultralytics evaluates PyTorch models on a 960×1024
   input, while the exports use a fixed 1024×1024 square.
 
-GPU_SECTION
+## Results on an NVIDIA H100
+
+YOLO26s detection, NMS-free head, TensorRT 11 engines built through NVIDIA ModelOpt
+([`src/edgeproof/gpu.py`](src/edgeproof/gpu.py)), batch 1, the engine alone:
+
+| Route | p50 ms | p99 ms | vs PyTorch | mAP50 | mAP50-95 | Recall @ 1% false alarms | Engine MB |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| PyTorch FP32 | 3.97 | 4.58 | 1.0× | 0.422 | 0.223 | 0.79 | 20.4 |
+| TensorRT FP32 | 1.63 | 1.64 | 2.4× | 0.415 | 0.222 | 0.77 | 245.0 |
+| **TensorRT FP16** | **1.17** | **1.17** | **3.4×** | **0.421** | **0.223** | **0.78** | **209.1** |
+| TensorRT INT8 (PTQ) | 1.07 | 1.07 | 3.7× | 0.398 | 0.210 | 0.80 | 96.2 |
+
+- **FP16 is the route on this GPU.** It runs 3.4× faster than PyTorch at FP32's accuracy. INT8
+  adds only 9% on top (1.07 against 1.17 ms): at batch 1 one image of a small model is far from
+  loading the H100, and the INT8 engine keeps every operation outside the convolutions in
+  FP16.
+- **INT8 after training costs more on TensorRT than on the CPU.** ModelOpt's calibration on 512
+  training images loses 0.017 mAP50 against the TensorRT FP32 engine, where NNCF's INT8 for
+  OpenVINO loses nothing on the same model. Recall at 1% false alarms holds (0.80), so the loss
+  is in box placement, not in finding the defect.
+- **Quantization-aware training costs little accuracy in float.** Ten epochs with INT8 simulated
+  in training against ten epochs of plain fine-tuning from the same checkpoint (test mAP50 in
+  PyTorch): 0.438 against 0.442 for YOLO26s, 0.384 against 0.394 for YOLO11s.
+- PyTorch scores 0.007 higher than the engines for the reason given above (a 960×1024 input
+  against the export's square). TensorRT's FP32 engine may compute in TF32, which is why FP16
+  can land slightly above it.
 
 ## ARM64 and the CI performance gate
 
