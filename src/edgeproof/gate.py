@@ -41,9 +41,12 @@ def load(path: Path) -> Gate:
     tolerance = cfg.get("tolerance", {})
     variants = [
         Variant(
-            name=v["name"], args=shlex.split(v["args"]), map50=v.get("map50"),
-            recall=v.get("recall"), budget_ms=v.get("budget_ms", {}),
-        )  # fmt: skip
+            name=v["name"],
+            args=shlex.split(v["args"]),
+            map50=v.get("map50"),
+            recall=v.get("recall"),
+            budget_ms=v.get("budget_ms", {}),
+        )
         for v in cfg["variants"]
     ]
     return Gate(variants, tolerance.get("map50", 0.01), tolerance.get("recall", 0.03))
@@ -54,9 +57,10 @@ def failures(gate: Gate, variant: Variant, row: Row) -> list[str]:
     out = []
     if variant.map50 is not None and row["box_map50"] < variant.map50 - gate.map50_tolerance:
         out.append(f"mAP50 {row['box_map50']:.3f} < {variant.map50:.3f} - {gate.map50_tolerance}")
-    recall = row.get("recall_at_far0.01")
-    if variant.recall is not None and recall < variant.recall - gate.recall_tolerance:
-        out.append(f"recall {recall:.3f} < {variant.recall:.3f} - {gate.recall_tolerance}")
+    if variant.recall is not None:
+        recall = row["recall_at_far0.01"]
+        if recall < variant.recall - gate.recall_tolerance:
+            out.append(f"recall {recall:.3f} < {variant.recall:.3f} - {gate.recall_tolerance}")
     budget = variant.budget_ms.get(row["arch"])
     if budget is not None and row["p50_ms"] > budget:
         out.append(f"p50 {row['p50_ms']:.0f} ms > budget {budget:.0f} ms")
@@ -66,7 +70,8 @@ def failures(gate: Gate, variant: Variant, row: Row) -> list[str]:
 def summary(gate: Gate, rows: list[tuple[Variant, Row]]) -> str:
     """A Markdown table of every variant against its reference and budget."""
     lines = [
-        "| Variant | Arch | p50 ms | Budget ms | mAP50 | Reference | Recall @ 1% | Reference | Result |",
+        "| Variant | Arch | p50 ms | Budget ms | mAP50 | Reference | Recall @ 1% | Reference "
+        "| Result |",
         "|---|---|--:|--:|--:|--:|--:|--:|---|",
     ]
 

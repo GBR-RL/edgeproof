@@ -84,7 +84,9 @@ def finetune(
     qat: Annotated[bool, typer.Option(help="With INT8 fake quantization (QAT).")] = True,
     epochs: Annotated[int, typer.Option(help="Epochs.")] = 10,
     lr0: Annotated[float, typer.Option(help="Initial AdamW learning rate.")] = 2e-4,
-    batch: Annotated[int | None, typer.Option(help="Batch size; the baseline's by default.")] = None,
+    batch: Annotated[int | None, typer.Option(help="Batch size, the baseline's by default.")] = (
+        None
+    ),
     workers: Annotated[int, typer.Option(help="Data loader processes.")] = 8,
     fraction: Annotated[float, typer.Option(help="Share of the training set (smoke tests).")] = 1.0,
     device: Annotated[str | None, typer.Option(help="auto, cpu, cuda, cuda:1, mps.")] = None,
