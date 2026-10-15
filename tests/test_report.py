@@ -1,6 +1,6 @@
 from typing import Any
 
-from edgeproof.report import TAG, fp32_table, int8_table, join
+from edgeproof.report import TAG, bf16_table, fp32_table, int8_table, join
 
 
 def _row(precision: str, runtime: str = "openvino", **kw: Any) -> dict[str, Any]:
@@ -28,8 +28,29 @@ def test_int8_rows_compare_with_fp32_of_the_same_runtime() -> None:
     table = int8_table(rows).splitlines()
     assert len(table) == 3
     assert table[2] == (
-        "| m | OpenVINO | performance | float | 40 | 2.5x | 0.390 (-0.010) | 0.200 (+0.000) "
-        "| 0.80 | 11.9 |"
+        "| m | NMS-free | OpenVINO | performance | float | 40 | 2.5x | 0.390 (-0.010) "
+        "| 0.200 (+0.000) | - | 0.80 | 11.9 |"
+    )
+
+
+def test_int8_rows_name_the_scope_calibration_size_and_mask() -> None:
+    rows = [
+        _row("fp32", p50_ms=100.0, mask_map50=0.41),
+        _row("int8-percentile-pc-decodefp-c512", runtime="onnxruntime", p50_ms=50.0),
+        _row("int8-performance-full-c32", p50_ms=25.0, mask_map50=0.4),
+    ]
+    ort, ov = int8_table(rows).splitlines()[2:]
+    assert "| percentile, 512 images | INT8, decoding in float | 50 | - |" in ort
+    assert "| performance, 32 images | INT8 | 25 | 4.0x |" in ov
+    assert "| 0.400 (-0.010) | 0.80 |" in ov
+
+
+def test_bf16_rows_compare_with_fp32_openvino() -> None:
+    rows = [_row("fp32", p50_ms=90.0), _row("bf16", p50_ms=30.0, box_map50=0.401)]
+    lines = bf16_table(rows).splitlines()
+    assert len(lines) == 3
+    assert lines[2] == (
+        "| m | NMS-free | 90 | 30 | 3.0x | 0.401 (+0.001) | 0.200 (+0.000) | - | 0.80 |"
     )
 
 
@@ -44,6 +65,7 @@ def test_tag_parses_every_ptq_variant() -> None:
     assert TAG.fullmatch("int8-entropy-pt-headfp-c32").groupdict() == {
         "method": "entropy", "channel": "pt", "scope": "headfp", "n": "32",
     }  # fmt: skip
+    assert TAG.fullmatch("int8-performance-decodefp-c512")["scope"] == "decodefp"  # type: ignore[index]
     assert TAG.fullmatch("int8-mixed-full-c128")["channel"] is None  # type: ignore[index]
 
 

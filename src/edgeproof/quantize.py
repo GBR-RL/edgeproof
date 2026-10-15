@@ -5,8 +5,11 @@ The choices measured, with ONNX Runtime (QDQ format) and OpenVINO (NNCF):
 - calibration method: min-max, entropy or percentile ranges for the activations (ONNX Runtime);
   NNCF's performance (symmetric) or mixed (asymmetric activations) preset (OpenVINO);
 - weights per output channel or per tensor (ONNX Runtime; NNCF is always per channel);
-- the detection head quantized or kept in float: the head turns features into box coordinates
-  and confidences, where an INT8 rounding step moves a box edge or a score directly;
+- the detection head quantized, kept in float, or only its decoding kept in float: the head's
+  convolutions turn features into box distances and class logits, and the operations after them
+  (sigmoid, distances to corners, multiplication by the stride, concatenation) decode those into
+  pixel coordinates and confidences, where an INT8 rounding step moves a box edge or a score
+  directly;
 - calibration set size.
 
 Calibration images are a seeded sample of the training split, preprocessed exactly as at
@@ -41,6 +44,7 @@ class PTQ:
     method: str = "minmax"  # minmax | entropy | percentile (ORT); performance | mixed (OpenVINO)
     per_channel: bool = True
     keep_head: bool = False
+    keep_decode: bool = False  # the head's convolutions in INT8, its decoding in float
     calib: int = 128
     head: Head = "e2e"  # which detection head is exported, not whether it is quantized
 
@@ -49,11 +53,13 @@ class PTQ:
                    "openvino": ("performance", "mixed")}[self.runtime]  # fmt: skip
         if self.method not in allowed:
             raise ValueError(f"{self.runtime} supports {allowed}, not {self.method!r}")
+        if self.keep_head and self.keep_decode:
+            raise ValueError("keep_head already keeps the decoding in float")
 
     @property
     def tag(self) -> str:
         channel = ("-pc" if self.per_channel else "-pt") if self.runtime == "onnxruntime" else ""
-        scope = "headfp" if self.keep_head else "full"
+        scope = "headfp" if self.keep_head else "decodefp" if self.keep_decode else "full"
         return f"int8-{self.method}{channel}-{scope}-c{self.calib}"
 
 
@@ -91,17 +97,44 @@ def tensors(paths: Sequence[Path], imgsz: int) -> Iterator[np.ndarray]:
         yield letterbox(image, imgsz)
 
 
-def head_nodes(ops: Sequence[tuple[str, str]]) -> list[str]:
-    """Names of the head's operations: every node of the last module that holds a Sigmoid
-    (the confidence output), plus all Sigmoids. ``ops`` are (name, type) pairs in graph order."""
+def _head_index(ops: Sequence[tuple[str, str]]) -> str | None:
+    """Module index of the head: the last module that holds a Sigmoid (the confidence output).
+    ONNX writes every SiLU as Sigmoid and Mul, so Sigmoids alone do not mark the head."""
     sigmoids = [name for name, kind in ops if kind == "Sigmoid"]
-    if not sigmoids:
+    match = re.search(r"model\.(\d+)", sigmoids[-1]) if sigmoids else None
+    return match.group(1) if match else None
+
+
+def head_nodes(ops: Sequence[tuple[str, str]]) -> list[str]:
+    """Names of the head's operations. ``ops`` are (name, type) pairs in graph order, named as
+    the ONNX export (``/model.23/cv2.0/conv/Conv``) or OpenVINO's PyTorch frontend
+    (``__module.model.23.cv2.0.conv/aten::_convolution/Convolution``) names them."""
+    index = _head_index(ops)
+    if index is None:
         return []
-    match = re.search(r"model\.(\d+)", sigmoids[-1])
-    if match is None:
-        return sigmoids
-    scope = re.compile(rf"model\.{match.group(1)}[/.]")
-    return [name for name, kind in ops if kind == "Sigmoid" or scope.search(name)]
+    scope = re.compile(rf"model\.{index}[/.]")
+    return [name for name, _ in ops if scope.search(name)]
+
+
+def decode_nodes(ops: Sequence[tuple[str, str]]) -> list[str]:
+    """The head's decoding: operations that belong to the head module itself or to its DFL,
+    not to one of its convolution branches. In ONNX names that is a single path component after
+    the head (``/model.23/Concat``), in OpenVINO names an operation right after it
+    (``__module.model.23/aten::cat/Concat``)."""
+    index = _head_index(ops)
+    if index is None:
+        return []
+    decode = re.compile(rf"model\.{index}(?:[/.]dfl[/.]|/[^/]+$|/\w+::)")
+    return [name for name, _ in ops if decode.search(name)]
+
+
+def excluded(ops: Sequence[tuple[str, str]], ptq: PTQ) -> list[str]:
+    """Operations the variant keeps in float."""
+    if ptq.keep_head:
+        return head_nodes(ops)
+    if ptq.keep_decode:
+        return decode_nodes(ops)
+    return []
 
 
 CHUNK = 8  # calibration images whose intermediate tensors are held in memory at once
@@ -147,7 +180,7 @@ def quantize_onnx(source: Path, target: Path, ptq: PTQ, calib: Sequence[Path], i
 
     model = onnx.load(str(source))
     input_name = model.graph.input[0].name
-    exclude = head_nodes([(n.name, n.op_type) for n in model.graph.node]) if ptq.keep_head else []
+    exclude = excluded([(n.name, n.op_type) for n in model.graph.node], ptq)
 
     class Reader(CalibrationDataReader):  # type: ignore[misc,unused-ignore]
         def __init__(self, items: Iterator[np.ndarray]) -> None:
@@ -189,11 +222,9 @@ def quantize_openvino(
 
     xml = next(source.glob("*.xml"))
     model = ov.Core().read_model(str(xml))
-    ignored = None
-    if ptq.keep_head:
-        names = head_nodes([(op.get_friendly_name(), op.get_type_name())
-                            for op in model.get_ordered_ops()])  # fmt: skip
-        ignored = nncf.IgnoredScope(names=names, validate=False)
+    names = excluded([(op.get_friendly_name(), op.get_type_name())
+                      for op in model.get_ordered_ops()], ptq)  # fmt: skip
+    ignored = nncf.IgnoredScope(names=names, validate=False) if names else None
     preset = {"performance": nncf.QuantizationPreset.PERFORMANCE,
               "mixed": nncf.QuantizationPreset.MIXED}[ptq.method]  # fmt: skip
     quantized = nncf.quantize(

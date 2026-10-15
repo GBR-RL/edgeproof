@@ -8,6 +8,8 @@ from edgeproof.quantize import (
     PTQ,
     calibration_images,
     chunks,
+    decode_nodes,
+    excluded,
     head_nodes,
     letterbox,
     variant_path,
@@ -19,6 +21,7 @@ def test_tag_names_every_choice() -> None:
     assert PTQ(method="entropy", per_channel=False, keep_head=True, calib=32).tag == (
         "int8-entropy-pt-headfp-c32"
     )
+    assert PTQ(keep_decode=True).tag == "int8-minmax-pc-decodefp-c128"
     # NNCF is always per channel, so the tag leaves it out.
     assert PTQ(runtime="openvino", method="mixed").tag == "int8-mixed-full-c128"
 
@@ -57,17 +60,46 @@ def test_calibration_sample_is_fixed_and_nested_in_the_split(tmp_path: Path) -> 
     assert len(calibration_images(tmp_path, 500)) == 50
 
 
+ONNX_OPS = [
+    ("/model.0/conv/Conv", "Conv"),
+    ("/model.0/act/Sigmoid", "Sigmoid"),  # SiLU, exported as Sigmoid and Mul
+    ("/model.22/cv2/Conv", "Conv"),
+    ("/model.23/cv2.0/cv2.0.0/conv/Conv", "Conv"),
+    ("/model.23/cv2.0/cv2.0.0/act/Sigmoid", "Sigmoid"),
+    ("/model.23/dfl/conv/Conv", "Conv"),
+    ("/model.23/Sigmoid", "Sigmoid"),
+    ("/model.23/Concat_3", "Concat"),
+    ("/model.230/Conv", "Conv"),
+]
+OPENVINO_OPS = [
+    ("__module.model.0.conv/aten::_convolution/Convolution", "Convolution"),
+    ("__module.model.23.cv2.0.0.conv/aten::_convolution/Convolution", "Convolution"),
+    ("__module.model.23.cv2.0.0.act/aten::silu_/Swish", "Swish"),
+    ("__module.model.23.dfl.conv/aten::_convolution/Convolution", "Convolution"),
+    ("__module.model.23/aten::sigmoid/Sigmoid", "Sigmoid"),
+    ("__module.model.23/aten::cat/Concat_3", "Concat"),
+]
+
+
 def test_head_nodes_take_the_last_module_with_a_sigmoid() -> None:
-    ops = [
-        ("/model.0/conv/Conv", "Conv"),
-        ("/model.22/cv2/Conv", "Conv"),
-        ("/model.23/cv2.0/Conv", "Conv"),
-        ("/model.23/Sigmoid", "Sigmoid"),
-        ("/model.23/Concat", "Concat"),
-        ("/model.230/Conv", "Conv"),
-    ]
-    assert head_nodes(ops) == ["/model.23/cv2.0/Conv", "/model.23/Sigmoid", "/model.23/Concat"]
+    assert head_nodes(ONNX_OPS) == [name for name, _ in ONNX_OPS[3:8]]
+    assert head_nodes(OPENVINO_OPS) == [name for name, _ in OPENVINO_OPS[1:]]
     assert head_nodes([("/a/Conv", "Conv")]) == []
+
+
+def test_decode_nodes_leave_the_head_convolutions_out() -> None:
+    assert decode_nodes(ONNX_OPS) == [
+        "/model.23/dfl/conv/Conv", "/model.23/Sigmoid", "/model.23/Concat_3",
+    ]  # fmt: skip
+    assert decode_nodes(OPENVINO_OPS) == [name for name, _ in OPENVINO_OPS[3:]]
+
+
+def test_excluded_nodes_follow_the_scope() -> None:
+    assert excluded(ONNX_OPS, PTQ()) == []
+    assert excluded(ONNX_OPS, PTQ(keep_head=True)) == head_nodes(ONNX_OPS)
+    assert excluded(ONNX_OPS, PTQ(keep_decode=True)) == decode_nodes(ONNX_OPS)
+    with pytest.raises(ValueError, match="keep_head"):
+        PTQ(keep_head=True, keep_decode=True)
 
 
 def test_variant_paths_per_runtime(tmp_path: Path) -> None:

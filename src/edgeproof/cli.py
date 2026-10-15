@@ -80,9 +80,10 @@ def train(
 
 def _measure(
     name: str, runtime: str, precision: str, path: Path, *, head: str, threads: int, runs: int,
-    accuracy: bool, out: Path,
+    accuracy: bool, out: Path, compute: str = "fp32",
 ) -> dict[str, Any]:  # fmt: skip
-    """One result row: latency and size on this machine, accuracy through the runtime."""
+    """One result row: latency and size on this machine, accuracy through the runtime.
+    ``compute`` is the precision OpenVINO runs the float operations in."""
     import platform
 
     from edgeproof import bench as b
@@ -94,9 +95,10 @@ def _measure(
                            "precision": precision, "cpu": b.cpu_name(),
                            "arch": platform.machine().lower(),
                            "size_mb": size_mb(path)}  # fmt: skip
-    row |= b.latency(path, runtime, imgsz, head=head, threads=threads, runs=runs)  # type: ignore[arg-type]
+    kw: dict[str, Any] = {"head": head, "compute": compute}
+    row |= b.latency(path, runtime, imgsz, threads=threads, runs=runs, **kw)  # type: ignore[arg-type]
     if accuracy:
-        row |= b.accuracy(path, task, YOLO_DATA, imgsz, head=head)  # type: ignore[arg-type]
+        row |= b.accuracy(path, task, YOLO_DATA, imgsz, **kw)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")
@@ -128,6 +130,7 @@ def bench(
         "torch,onnxruntime,openvino"
     ),
     head: HeadOpt = "e2e",
+    precision: Annotated[str, typer.Option(help="fp32, or bf16 (OpenVINO only).")] = "fp32",
     threads: Threads = 4,
     runs: Runs = 100,
     skip_accuracy: SkipAccuracy = False,
@@ -136,11 +139,14 @@ def bench(
     """Export a trained model to each runtime and measure latency, size and accuracy on CPU."""
     from edgeproof.export import export
 
+    if precision not in {"fp32", "bf16"} or (precision == "bf16" and runtimes != "openvino"):
+        raise typer.BadParameter("--precision is fp32, or bf16 with --runtimes openvino")
     head = _head(name, head)
     for runtime in runtimes.split(","):
         path = export(MODELS, name, runtime, _imgsz(name), head)  # type: ignore[arg-type]
-        _measure(name, runtime, "fp32", path, head=head, threads=threads, runs=runs,
-                 accuracy=not skip_accuracy, out=out or RESULTS / "runtimes.jsonl")  # fmt: skip
+        _measure(name, runtime, precision, path, head=head, threads=threads, runs=runs,
+                 accuracy=not skip_accuracy, out=out or RESULTS / "runtimes.jsonl",
+                 compute=precision)  # fmt: skip
 
 
 @app.command()
@@ -152,6 +158,9 @@ def ptq(
     ),
     per_channel: Annotated[bool, typer.Option(help="Per-channel weight scales (ORT).")] = True,
     keep_head: Annotated[bool, typer.Option(help="Keep the detection head in float.")] = False,
+    float_decode: Annotated[bool, typer.Option(help="Keep only the head's decoding in float.")] = (
+        False
+    ),
     calib: Annotated[int, typer.Option(help="Calibration images.")] = 128,
     head: HeadOpt = "e2e",
     threads: Threads = 4,
@@ -163,7 +172,8 @@ def ptq(
     from edgeproof.quantize import PTQ, build
 
     spec = PTQ(runtime=runtime, method=method, per_channel=per_channel,  # type: ignore[arg-type]
-               keep_head=keep_head, calib=calib, head=_head(name, head))  # fmt: skip
+               keep_head=keep_head, keep_decode=float_decode, calib=calib,
+               head=_head(name, head))  # fmt: skip
     path = build(MODELS, name, spec, YOLO_DATA, _imgsz(name))
     _measure(name, runtime, spec.tag, path, head=spec.head, threads=threads, runs=runs,
              accuracy=not skip_accuracy, out=out or RESULTS / "ptq.jsonl")  # fmt: skip
@@ -178,11 +188,11 @@ def report(
         RESULTS / "latency.jsonl"
     ),
 ) -> None:
-    """Print the FP32 and INT8 result tables as Markdown."""
+    """Print the FP32, BF16 and INT8 result tables as Markdown."""
     from edgeproof import report as r
 
     rows = r.join(r.load(accuracy), r.load(latency) if latency.exists() else [])
-    typer.echo(r.fp32_table(rows) + "\n\n" + r.int8_table(rows))
+    typer.echo("\n\n".join((r.fp32_table(rows), r.bf16_table(rows), r.int8_table(rows))))
 
 
 @app.command()

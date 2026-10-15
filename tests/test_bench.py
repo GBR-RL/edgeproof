@@ -53,3 +53,7 @@ def test_pinned_keeps_explicit_options_and_restores(monkeypatch: pytest.MonkeyPa
         assert ort.InferenceSession("m.onnx", mine) is mine
     assert ort.InferenceSession("m.onnx") is None  # the original again
     assert ov.Core().compile_model("m.xml") is None
+
+
+def test_bf16_is_a_precision_of_its_own() -> None:
+    assert ov_config(4, "bf16") == {"INFERENCE_NUM_THREADS": 4, "INFERENCE_PRECISION_HINT": "bf16"}
