@@ -31,6 +31,15 @@ variants:
     map50: 0.399
     recall: 0.771
     budget_ms: {x86_64: 250}
+    archs: [x86_64]
+  # ONNX Runtime's INT8 kernels for ARM64 round differently: the same quantized model catches
+  # 0.738 of the defective images there. References measured on the Neoverse-N2 runner.
+  - name: YOLO26s ONNX Runtime INT8, head in float (ARM64 kernels)
+    args: ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method minmax --keep-head
+    map50: 0.397
+    recall: 0.738
+    budget_ms: {aarch64: 240}
+    archs: [aarch64]
   - name: YOLO11s OpenVINO INT8, decoding in float
     args: ptq --name yolo11s-det-1024 --head nms --runtime openvino --method performance --float-decode
     map50: 0.386
