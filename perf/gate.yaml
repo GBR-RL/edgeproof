@@ -1,9 +1,15 @@
 # CI performance gate (`edgeproof gate`). Every variant is rebuilt from the trained checkpoint,
 # timed on the runner (4 threads, batch 1, the network alone) and evaluated on the 960 test
-# images. References are the accuracies measured on the cluster (results/accuracy.jsonl); budgets
-# sit about 1.5x above what the shared GitHub runners measure (their CPUs vary: AMD EPYC 9V74 and
-# Intel Xeon 8573C for x86_64, Neoverse-N2 for aarch64). OpenVINO runs on x86_64 only: on the
-# Neoverse-N2 it needs 3.2 s per image in FP32, nine times ONNX Runtime, and would not finish.
+# images. References are the accuracies measured on the cluster (results/accuracy.jsonl).
+#
+# Latency: GitHub's runners differ in CPU from run to run (x86_64 seen: AMD EPYC 7763 / Zen 3,
+# EPYC 9V74 / Zen 4, Intel Xeon 8573C; aarch64: Neoverse-N2), and INT8 speed differs by 2x
+# between them. So an INT8 variant must be a minimum factor faster than FP32 measured in the same
+# run (minimums below what the slowest of these CPUs reaches), and the FP32 budgets sit 1.5x
+# above the slowest runner, to catch gross slowdowns only.
+#
+# OpenVINO runs on x86_64 only: on the Neoverse-N2 it needs 3.2 s per image in FP32, nine times
+# ONNX Runtime, and would not finish.
 tolerance:
   map50: 0.01   # one INT8 variant against another differs by about this much
   recall: 0.03  # 7 of 240 defective test images
@@ -13,36 +19,40 @@ variants:
     args: bench --name yolo26s-det-1024 --head e2e --runtimes onnxruntime
     map50: 0.415
     recall: 0.779
-    budget_ms: {x86_64: 400, aarch64: 520}
+    budget_ms: {x86_64: 550, aarch64: 560}
   - name: YOLO26s OpenVINO FP32
     args: bench --name yolo26s-det-1024 --head e2e --runtimes openvino
     map50: 0.415
     recall: 0.779
-    budget_ms: {x86_64: 400}
+    budget_ms: {x86_64: 550}
     archs: [x86_64]
   - name: YOLO26s OpenVINO INT8
     args: ptq --name yolo26s-det-1024 --head e2e --runtime openvino --method performance
     map50: 0.415
     recall: 0.771
-    budget_ms: {x86_64: 150}
+    speedup: {over: YOLO26s OpenVINO FP32, min: 1.3}  # Zen 3 1.6x, Zen 4 2.8x
     archs: [x86_64]
+  # ONNX Runtime's U8S8 kernels use VPMADDUBSW on x86 CPUs without VNNI, whose 16-bit sums
+  # saturate: on a Zen 3 runner this model scores 0.016 mAP50. Checked where it is meant to run.
   - name: YOLO26s ONNX Runtime INT8, head in float
     args: ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method minmax --keep-head
     map50: 0.399
     recall: 0.771
-    budget_ms: {x86_64: 250}
+    speedup: {over: YOLO26s ONNX Runtime FP32, min: 1.3}  # Zen 4 1.7x
     archs: [x86_64]
+    cpu_flags: [avx512_vnni, avx_vnni]
   # ONNX Runtime's INT8 kernels for ARM64 round differently: the same recipe catches
   # 0.738 of the defective images there. References measured on the Neoverse-N2 runner.
   - name: YOLO26s ONNX Runtime INT8, head in float (ARM64 kernels)
     args: ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method minmax --keep-head
     map50: 0.397
     recall: 0.738
-    budget_ms: {aarch64: 240}
+    speedup: {over: YOLO26s ONNX Runtime FP32, min: 1.6}  # Neoverse-N2 2.4x
     archs: [aarch64]
+  # Against YOLO26s OpenVINO FP32: a model of the same size (94 vs 93 ms on the cluster's Xeon).
   - name: YOLO11s OpenVINO INT8, decoding in float
     args: ptq --name yolo11s-det-1024 --head nms --runtime openvino --method performance --float-decode
     map50: 0.386
     recall: 0.775
-    budget_ms: {x86_64: 180}
+    speedup: {over: YOLO26s OpenVINO FP32, min: 1.3}  # Zen 3 1.6x, Zen 4 2.3x
     archs: [x86_64]
