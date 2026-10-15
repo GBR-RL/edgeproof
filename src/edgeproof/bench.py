@@ -87,7 +87,7 @@ def pinned(threads: int, compute: Compute = "fp32") -> Iterator[None]:
 
 
 def _runner(
-    path: Path, runtime: Runtime, imgsz: int, threads: int, head: Head, compute: Compute
+    path: Path, runtime: Runtime, imgsz: int, threads: int, head: Head, *, compute: Compute
 ) -> Callable[[], Any]:
     x = np.random.default_rng(0).random((1, 3, imgsz, imgsz), dtype=np.float32)
     if runtime == "onnxruntime":
@@ -128,7 +128,7 @@ def latency(
     runs: int = 100, warmup: int = 10, compute: Compute = "fp32",
 ) -> dict[str, float]:  # fmt: skip
     """Milliseconds per image for the network alone, batch 1."""
-    run = _runner(path, runtime, imgsz, threads, head, compute)
+    run = _runner(path, runtime, imgsz, threads, head, compute=compute)
     for _ in range(warmup):
         run()
     times = []

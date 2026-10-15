@@ -101,13 +101,13 @@ def int8_table(rows: list[Row]) -> str:
             method += f", {tag['n']} images"
         lines.append(
             f"| {r['model']} | {HEADS[r['head']]} | {RUNTIMES[r['runtime']]} | {method} "
-            f"| {SCOPES[tag['scope']]} | {_ms(r['p50_ms'])} | {_speedup(fp32.get('p50_ms'), r['p50_ms'])} "
+            f"| {SCOPES[tag['scope']]} | {_ms(r['p50_ms'])} "
+            f"| {_speedup(fp32.get('p50_ms'), r['p50_ms'])} "
             f"| {_delta(r['box_map50'], fp32.get('box_map50'))} "
             f"| {_delta(r['box_map50_95'], fp32.get('box_map50_95'))} | {_mask(r, fp32)} "
             f"| {_f(r['recall_at_far0.01'], 2)} | {r['size_mb']:.1f} |"
         )
-    return "
-".join(lines)
+    return "\n".join(lines)
 
 
 def bf16_table(rows: list[Row]) -> str:
@@ -129,5 +129,4 @@ def bf16_table(rows: list[Row]) -> str:
             f"| {_delta(r['box_map50_95'], fp32.get('box_map50_95'))} | {_mask(r, fp32)} "
             f"| {_f(r['recall_at_far0.01'], 2)} |"
         )
-    return "
-".join(lines)
+    return "\n".join(lines)

@@ -192,7 +192,7 @@ def report(
     from edgeproof import report as r
 
     rows = r.join(r.load(accuracy), r.load(latency) if latency.exists() else [])
-    typer.echo(r.fp32_table(rows) + "\n\n" + r.int8_table(rows))
+    typer.echo("\n\n".join((r.fp32_table(rows), r.bf16_table(rows), r.int8_table(rows))))
 
 
 @app.command()
