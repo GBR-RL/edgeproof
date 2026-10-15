@@ -255,11 +255,11 @@ def gate(
     from edgeproof import gate as g
 
     spec = g.load(config)
-    arch = platform.machine().lower()
+    arch, flags = platform.machine().lower(), g.cpu_flags()
     rows = []
     for variant in spec.variants:
-        if not variant.runs_on(arch):
-            typer.echo(f"== {variant.name}: not on {arch}")
+        if reason := variant.skip_reason(arch, flags):
+            typer.echo(f"== {variant.name}: skipped, {reason}")
             continue
         typer.echo(f"== {variant.name}: edgeproof {' '.join(variant.args)}")
         app([*variant.args, "--out", str(out)], standalone_mode=False)
@@ -270,7 +270,8 @@ def gate(
     if summary is not None:
         with summary.open("a", encoding="utf-8") as f:
             f.write(table + "\n")
-    if any(g.failures(spec, variant, row) for variant, row in rows):
+    measured = {variant.name: row for variant, row in rows}
+    if any(g.failures(spec, variant, row, measured) for variant, row in rows):
         raise typer.Exit(1)
 
 
