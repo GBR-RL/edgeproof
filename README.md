@@ -1,16 +1,20 @@
 # edgeproof
 
 [![CI](https://github.com/GBR-RL/edgeproof/actions/workflows/ci.yml/badge.svg)](https://github.com/GBR-RL/edgeproof/actions/workflows/ci.yml)
+[![Performance gate](https://github.com/GBR-RL/edgeproof/actions/workflows/perf.yml/badge.svg)](https://github.com/GBR-RL/edgeproof/actions/workflows/perf.yml)
+[![C++ runner](https://github.com/GBR-RL/edgeproof/actions/workflows/cpp.yml/badge.svg)](https://github.com/GBR-RL/edgeproof/actions/workflows/cpp.yml)
 
 What accuracy does it cost to make an industrial inspection model fast on the hardware at the
 line, and which deployment route pays off? edgeproof trains defect detectors and segmenters on
-VisA, exports them to ONNX Runtime and OpenVINO, quantizes them to INT8 after training, and
-measures every variant the same way: latency of one image on a fixed number of CPU threads, and
-accuracy through the runtime itself on 960 test images.
+VisA and takes them through every common route to production: ONNX Runtime and OpenVINO on x86
+and ARM64 CPUs, INT8 after training (PTQ) and quantization-aware training (QAT), TensorRT on an
+NVIDIA GPU, and a C++ runner. Every variant is measured the same way: latency of one image, and
+accuracy through the runtime itself on 960 test images. A CI gate rebuilds the main variants on
+x86-64 and ARM64 runners for every pull request and fails when accuracy or latency regress.
 
-The code picks a GPU automatically (CUDA or Apple MPS, else the CPU) and runs on either. The
-models were trained on one NVIDIA H100 of the RWTH CLAIX-2023 cluster; the deployment numbers
-below are measured on CPU, the hardware an inspection station usually has.
+The code picks a GPU automatically (CUDA or Apple MPS, else the CPU) and runs on either. Models
+were trained and the GPU numbers measured on one NVIDIA H100 of the RWTH CLAIX-2023 cluster; the
+CPU numbers come from a Xeon node of the same cluster and from GitHub's x86-64 and ARM64 runners.
 
 ## Setup
 
@@ -20,62 +24,156 @@ below are measured on CPU, the hardware an inspection station usually has.
   One class, "defect": boxes for detection, polygons for segmentation.
 - **Models.** YOLO26s, whose head can skip NMS, and YOLO11s, each for detection and
   segmentation, at 1024 px. 100 epochs from COCO weights, 9 to 19 GPU-minutes per model on the
-  H100 ([`slurm/train.sbatch`](slurm/train.sbatch)).
+  H100 ([`slurm/train.sbatch`](slurm/train.sbatch)). The trained detectors are attached to the
+  [models-v1 release](https://github.com/GBR-RL/edgeproof/releases/tag/models-v1).
 - **Accuracy.** Box mAP50 and mAP50-95 (and mask mAP50) on the test split, plus the line's view:
   each image scored by its most confident detection, the threshold set so that 1% of the
   defect-free images would be rejected, and the share of defective images caught at that
   threshold. One defective image is 0.4 points of this recall, so differences of a few points
   are noise.
-- **Latency.** Batch 1, 1024×1024, 4 threads, the network alone (pre- and post-processing are
+- **CPU latency.** Batch 1, 1024×1024, 4 threads, the network alone (pre- and post-processing are
   separate), median and 99th percentile of 100 runs after 10 warm-up runs. Every variant measured
   in one job on one otherwise idle node with an Intel Xeon Platinum 8468
-  ([`slurm/latency.sbatch`](slurm/latency.sbatch)). All runtimes compute in FP32 unless the row
-  says INT8.
+  ([`slurm/latency.sbatch`](slurm/latency.sbatch)).
+- **GPU latency.** The engine alone with its input already in GPU memory, batch 1, median of 1000
+  runs ([`src/edgeproof/gpu.py`](src/edgeproof/gpu.py)).
 
-## Results
+## Results on an x86 CPU
 
-YOLO26s detection, NMS-free head, the routes from training framework to INT8:
+YOLO26s detection, NMS-free head, from training framework to INT8 (Xeon Platinum 8468, 4 threads):
 
 | Route | p50 ms | p99 ms | vs PyTorch | mAP50 | mAP50-95 | Recall @ 1% false alarms | Size MB |
 |---|--:|--:|--:|--:|--:|--:|--:|
 | PyTorch FP32 | 172 | 178 | 1.0× | 0.423 | 0.223 | 0.79 | 20.4 |
 | ONNX Runtime FP32 | 120 | 125 | 1.4× | 0.415 | 0.222 | 0.78 | 38.4 |
 | OpenVINO FP32 | 93 | 97 | 1.8× | 0.415 | 0.222 | 0.78 | 38.5 |
-| ONNX Runtime INT8 (percentile, head in float) | 71 | 77 | 2.4× | 0.417 | 0.217 | 0.78 | 11.9 |
+| ONNX Runtime INT8 (percentile, decoding in float) | 64 | 65 | 2.7× | 0.409 | 0.212 | 0.78 | 10.7 |
+| **OpenVINO BF16 (AMX)** | **30** | **34** | **5.8×** | **0.412** | **0.221** | **0.79** | **38.5** |
 | **OpenVINO INT8 (NNCF performance)** | **31** | **35** | **5.5×** | **0.415** | **0.213** | **0.77** | **10.6** |
 
-All 18 FP32 and 24 INT8 variants, segmentation included, are in
+All 18 FP32, 6 BF16 and 49 INT8 variants, segmentation included, are in
 [docs/results.md](docs/results.md).
 
-- **OpenVINO INT8 is the route that pays off on an x86 CPU.** It is 5.5× faster than PyTorch and
-  3.0× faster than OpenVINO FP32. mAP50 is unchanged, mAP50-95 drops by 0.009, recall at 1% false
-  alarms by one point (within noise), and the model is 3.6× smaller. INT8 through ONNX Runtime
-  gets 1.7× over its FP32 and stays 2.3× slower than OpenVINO INT8 on this CPU.
+- **On a Xeon with AMX, BF16 is as fast as INT8 and needs no calibration.** OpenVINO in bfloat16
+  runs every model 3.1 to 3.4× faster than in FP32, the same speed as INT8, within 0.003 mAP50
+  and 0.003 mask mAP50 of FP32 and without a calibration set. INT8 still makes the model 3.6×
+  smaller, and it needs no AMX.
+- **INT8 breaks where the head turns features into coordinates.** Quantizing the whole network
+  fails in two ways. ONNX Runtime puts box coordinates (0 to 1024 px) and confidences (0 to 1)
+  under one INT8 output scale of about 4, so every confidence rounds to 0 and all eight fully
+  quantized variants detect nothing. OpenVINO's quantizer (NNCF) keeps the last operations in
+  float, but in YOLO11 it still quantizes the decoded boxes in grid cells, before the
+  multiplication by the stride, where one INT8 step is several pixels: mAP50 falls from 0.390 to
+  0.243 while recall, which depends on the confidences alone, stays at 0.78. Keeping only the
+  decoding in float (`--float-decode`: the head's convolutions stay INT8) fixes both: YOLO11 on
+  OpenVINO 0.386 at 28 ms, ONNX Runtime with entropy calibration 0.390 instead of 0, and it is
+  faster than keeping the whole head in float (64 instead of 71 ms on ONNX Runtime). YOLO26's
+  decoding already stays in float under NNCF, so there full INT8 costs no mAP50.
+- **The NMS head is the better choice for INT8 too.** YOLO26's NMS-free head loses 2 points of
+  mAP50 and 6 points of recall at 1% false alarms against the same model's NMS head (0.415 vs
+  0.436, 0.78 vs 0.84), and the network is as fast with either. With the decoding in float, the
+  NMS head keeps its lead in INT8: 0.433 on ONNX Runtime (61 ms), 0.424 on OpenVINO (31 ms), at
+  0.82 recall.
+- **Segmentation quantizes as well as detection, given the same care.** YOLO26s-seg in full INT8
+  on OpenVINO loses 0.013 mask mAP50 at 42 ms (3.4× over FP32). YOLO11s-seg loses 0.080 in full
+  INT8 and 0.023 with the decoding in float, at 38 ms.
+- **128 calibration images are enough.** 32 images cost YOLO26 on OpenVINO 0.008 mAP50 and
+  3 points of recall. 512 images move mAP50 by -0.006 to +0.001 against 128 across four
+  configurations, no more than the spread between calibration methods.
 - **Exporting costs nothing.** Evaluated on the same square input with the same head, PyTorch
   gives YOLO26s 0.4151 mAP50 and 0.2220 mAP50-95, the exports 0.4151 and 0.2220. The PyTorch row
   above scores 0.008 higher only because Ultralytics evaluates PyTorch models on a 960×1024
-  input, while the exports use a fixed 1024×1024 square; on the other models the gap is within
-  ±0.004.
-- **YOLO26's NMS-free head costs accuracy and saves almost no time here.** Against the model's
-  own NMS head it loses 2 points of mAP50 (0.415 vs 0.436 through the exports) and 6 points of
-  recall at 1% false alarms (0.78 vs 0.84). The network is as fast with either head (93 ms on
-  OpenVINO), and NMS for one class takes 0.8 ms of post-processing against 0.3 ms without it.
-- **Fully quantized, ONNX Runtime INT8 detects nothing.** All eight variants that quantize the
-  head score exactly 0, for both models and every calibration method. The output tensor carries
-  box coordinates (0 to 1024 px) and confidences (0 to 1) under one INT8 scale of about 4, so
-  every confidence rounds to 0. With the head kept in float (1.4 to 2.5 MB larger), entropy and
-  percentile calibration land within 0.01 mAP50 of FP32; min-max with per-tensor weights loses
-  0.058 on YOLO26.
-- **The architecture decides whether full INT8 works.** OpenVINO's quantizer (NNCF) leaves the
-  last operations in float. In YOLO26 its nearest quantization point is ten operations before
-  the output, so the box decoding stays in float and full INT8 with the performance preset costs
-  no mAP50. In YOLO11 it
-  quantizes the decoded box coordinates, in grid cells before the multiplication by the stride,
-  where one INT8 step becomes several pixels. Its mAP50 falls from 0.390 to 0.243 while recall
-  at 1% false alarms, which depends on the confidences alone, stays at 0.78. Keeping YOLO11's
-  head in float restores FP32 accuracy exactly, at 37 instead of 28 ms.
-- **Segmentation follows the same ranking.** OpenVINO FP32 runs YOLO26s-seg in 143 ms and
-  YOLO11s-seg in 136 ms, against 256 and 226 ms in PyTorch, at equal mask mAP.
+  input, while the exports use a fixed 1024×1024 square.
+
+## Results on an NVIDIA H100
+
+YOLO26s detection, NMS-free head, TensorRT 11 engines built through NVIDIA ModelOpt
+([`src/edgeproof/gpu.py`](src/edgeproof/gpu.py)), batch 1, the engine alone:
+
+| Route | p50 ms | p99 ms | vs PyTorch | mAP50 | mAP50-95 | Recall @ 1% false alarms | Engine MB |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| PyTorch FP32 | 3.97 | 4.58 | 1.0× | 0.422 | 0.223 | 0.79 | 20.4 |
+| TensorRT FP32 | 1.63 | 1.64 | 2.4× | 0.415 | 0.222 | 0.77 | 245.0 |
+| **TensorRT FP16** | **1.17** | **1.17** | **3.4×** | **0.421** | **0.223** | **0.78** | **209.1** |
+| TensorRT INT8 (PTQ) | 1.07 | 1.07 | 3.7× | 0.398 | 0.210 | 0.80 | 96.2 |
+
+- **FP16 is the route on this GPU.** It runs 3.4× faster than PyTorch at FP32's accuracy. INT8
+  adds only 9% on top (1.07 against 1.17 ms): at batch 1 one image of a small model is far from
+  loading the H100, and the INT8 engine keeps every operation outside the convolutions in
+  FP16.
+- **INT8 after training costs more on TensorRT than on the CPU.** ModelOpt's calibration on 512
+  training images loses 0.017 mAP50 against the TensorRT FP32 engine, where NNCF's INT8 for
+  OpenVINO loses nothing on the same model. Recall at 1% false alarms holds (0.80), so the loss
+  is in box placement, not in finding the defect.
+- **Quantization-aware training costs little accuracy in float.** Ten epochs with INT8 simulated
+  in training against ten epochs of plain fine-tuning from the same checkpoint (test mAP50 in
+  PyTorch): 0.438 against 0.442 for YOLO26s, 0.384 against 0.394 for YOLO11s.
+- PyTorch scores 0.007 higher than the engines for the reason given above (a 960×1024 input
+  against the export's square). TensorRT's FP32 engine may compute in TF32, which is why FP16
+  can land slightly above it.
+
+## ARM64 and the CI performance gate
+
+[`edgeproof gate`](src/edgeproof/gate.py) rebuilds the variants in
+[`perf/gate.yaml`](perf/gate.yaml) from the released checkpoints, times them and evaluates them on
+the 960 test images. It fails when mAP50 or recall drop below the cluster's reference (by more
+than 0.01 and 0.03), when an INT8 variant is not a minimum factor faster than FP32 in the same
+run, or when FP32 exceeds a generous budget for the CPU architecture. The
+[performance workflow](.github/workflows/perf.yml) runs it on GitHub's 4-vCPU x86-64 and ARM64
+runners for every pull request that touches the code. YOLO26s, NMS-free head, 4 threads, p50 ms
+and mAP50 on the four runner CPUs seen:
+
+| Variant | x86-64 Xeon 8573C | x86-64 Zen 4 (EPYC 9V74) | x86-64 Zen 3 (EPYC 7763) | ARM64 (Neoverse-N2) |
+|---|--:|--:|--:|--:|
+| ONNX Runtime FP32 | 220 ms, 0.415 | 271 ms, 0.415 | 365 ms, 0.415 | 345 ms, 0.420 |
+| OpenVINO FP32 | 193 ms, 0.415 | 272 ms, 0.415 | 346 ms, 0.415 | 3,182 ms, 0.420 |
+| ONNX Runtime INT8, head in float | 122 ms, 0.396 | 163 ms, 0.396 | 245 ms, **0.016** | 145 ms, 0.397 |
+| OpenVINO INT8 | 64 ms, 0.415 | 98 ms, 0.414 | 210 ms, 0.417 | - |
+
+- **ONNX Runtime INT8 breaks on x86 CPUs without VNNI.** On the Zen 3 runner the same INT8 model
+  that scores 0.396 on Zen 4 and 0.399 on the cluster's Xeon detects almost nothing (0.016
+  mAP50). ONNX Runtime's U8S8 kernels use `VPMADDUBSW` on x86 CPUs without VNNI, whose 16-bit
+  intermediate sums can saturate; its documentation recommends 7-bit weights (`reduce_range`) or
+  U8U8 there (not measured here). An INT8 model validated on one x86 machine is not validated
+  for the fleet. The gate checks this variant only on runners with VNNI and says so on others.
+- **On ARM64, ONNX Runtime is the runtime, and INT8 pays off more than on x86.** OpenVINO
+  2026.4 runs the FP32 model nine times slower than ONNX Runtime on the Neoverse-N2, so the gate
+  runs OpenVINO on x86-64 only. ONNX Runtime INT8 gets 2.4× over FP32 there, against 1.7× on Zen
+  4, and has no saturation problem (ARM's dot-product instructions accumulate in 32 bits).
+- **The same recipe gives slightly different models per architecture.** ONNX Runtime FP32
+  scores 0.420 mAP50 on ARM64 and 0.415 on x86-64; INT8 catches 0.74 of the defective images
+  on ARM64 against 0.78. Small numeric differences in kernels and resizing move borderline
+  detections. The gate therefore checks against a lower bound with a tolerance, and the ARM64
+  INT8 variant has references of its own.
+- **Absolute latency budgets do not work on shared runners.** The x86-64 runner was a Xeon, a
+  Zen 4 or a Zen 3 from one run to the next, and OpenVINO INT8 took 64, 98 or 210 ms. The gate
+  therefore asks for a speed-up over FP32 measured in the same run (1.3× for INT8 on x86-64; the
+  runners reach 1.6 to 3.0×), which only fails when quantization stops working.
+
+## A C++ runner
+
+[`cpp/`](cpp) runs the exported models the way a line application would, through the ONNX Runtime
+C++ API: read, letterbox with OpenCV, infer, decode (YOLO26's NMS-free output or NMS for YOLO11),
+scale back. The geometry and the decoding are unit-tested on their own. CI builds it on x86-64
+and ARM64, runs it on the 960 test images and compares every image's detections with Ultralytics
+running the same ONNX model ([`cpp/parity.py`](cpp/parity.py)). Per-image medians on the same
+runners, ONNX Runtime FP32, 4 threads:
+
+| Runner | Model | Identical detections | Python pre / infer / post ms | C++ pre / infer / post ms | End to end |
+|---|---|--:|--:|--:|--:|
+| x86-64, Xeon Platinum 8573C | YOLO26s, NMS-free | 960 / 960 | 7.0 / 232 / 0.3 | 4.4 / 226 / 0.0 | -3.6% |
+| x86-64, Xeon Platinum 8573C | YOLO11s, NMS | 960 / 960 | 7.3 / 246 / 0.5 | 4.4 / 242 / 0.0 | -2.8% |
+| ARM64, Neoverse-N2 | YOLO26s, NMS-free | 949 / 960 | 3.8 / 356 / 0.3 | 3.1 / 357 / 0.0 | -0.1% |
+| ARM64, Neoverse-N2 | YOLO11s, NMS | 949 / 960 | 3.4 / 369 / 0.6 | 2.8 / 366 / 0.0 | -1.0% |
+
+- **The detections match.** On x86-64 the C++ runner reproduces Ultralytics exactly (boxes within
+  0.001 px). On ARM64 the system's OpenCV 4.6 and opencv-python 5.0 round the bilinear resize
+  differently by one grey level (JPEG decoding is identical); that moves a borderline detection
+  on 11 of 960 images.
+- **C++ buys almost nothing here.** It cuts pre-processing by a third on x86-64 and decoding to
+  nothing, but the network is over 95% of the time, so the whole pipeline gets 0.1 to 3.6% faster.
+  For a model of this size, quantization and the choice of runtime decide the latency, not the
+  language around them; C++ matters for deployment (no Python on the device), not for speed.
 
 ## Pitfalls found on the way
 
@@ -88,16 +186,24 @@ Each of these silently produced wrong or misleading numbers before it was fixed:
   The head is a parameter here and part of every result row.
 - **OpenVINO computes in bfloat16 on CPUs with AMX.** On the Xeon 8468 the CPU plugin's default
   inference precision is bf16, so "FP32" OpenVINO numbers from such a machine are bf16 unless
-  `INFERENCE_PRECISION_HINT` is set.
+  `INFERENCE_PRECISION_HINT` is set. Here FP32 sets it, and BF16 is a precision of its own.
 - **ONNX Runtime sizes its thread pool for the whole machine, not the Slurm job.** Inside an
   8-core job on a 96-core node it started about 120 threads and validation slowed tenfold. Its
   idle workers also spin between runs and starved the Python pre- and post-processing on the same
-  cores (3 ms per image became up to 270 ms).
+  cores (3 ms per image became up to 270 ms). ModelOpt's INT8 calibration for TensorRT runs
+  through ONNX Runtime on the CPU and hits the same oversubscription: 22 minutes per model while
+  the GPU waits.
 - **ONNX Runtime's `CalibMaxIntermediateOutputs` discards data** (version 1.31). Meant to bound the
   min-max calibrator's memory, it clears each full chunk without computing its ranges: with a
   multiple of the chunk size nothing is left and calibration fails, with any other count it
   calibrates on the remainder only. Calibration here feeds chunks itself; the ranges equal a
   single pass exactly.
+- **Keeping the "head" in float with ONNX Runtime changes nothing for its sigmoids.** ONNX
+  Runtime never quantizes `Sigmoid`, so excluding the head's sigmoids from quantization gives
+  exactly the same model; what matters is the decoding after them.
+- **TensorRT 11 has no precision flags any more.** Networks are strongly typed: FP16 and INT8 must
+  be in the ONNX graph (ModelOpt AutoCast, Q/DQ nodes) before the build, and the INT8 calibrator
+  API is gone.
 - **Ultralytics runs a list of image paths as one batch.** `predict([...960 paths...])` sent all
   test images through the network at once and needed 12 GB for the first convolution.
 - **ONNX Runtime writes a shape-inferred copy next to the model it quantizes.** Variants quantized
@@ -111,12 +217,20 @@ edgeproof data                                   # download VisA, split, write Y
 edgeproof train --family yolo26 --task detect    # GPU if available
 edgeproof bench --name yolo26s-det-1024 --head e2e
 edgeproof ptq --name yolo26s-det-1024 --runtime openvino --method performance
-edgeproof report                                 # the tables above, from results/
+edgeproof finetune --name yolo26s-det-1024 --qat # quantization-aware, needs CUDA
+edgeproof gpu --name yolo26s-det-1024-qat --precision int8   # TensorRT, needs CUDA
+edgeproof gate                                   # the CI performance gate, locally
+edgeproof report                                 # the tables, from results/
 ```
 
-On a Slurm cluster, [`slurm/`](slurm) has the jobs used here: training on one GPU behind a
-quota check, CPU jobs for benchmarks and quantization, and the whole-node latency run over
-[`slurm/variants.txt`](slurm/variants.txt). The raw result rows are in [`results/`](results).
+The C++ runner builds with CMake (OpenCV and a C++20 compiler; ONNX Runtime is downloaded):
 
-Still to come: quantization-aware training and TensorRT on the H100, ARM64 CPUs, a performance
-gate in CI, and a C++ runner.
+```bash
+cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+./build/edgeproof-run --model yolo26s-det-1024.onnx --images data/yolo/detect/images/test
+```
+
+On a Slurm cluster, [`slurm/`](slurm) has the jobs used here: training and the GPU work on one
+GPU behind a quota check, CPU jobs for benchmarks and quantization, and the whole-node latency
+run over [`slurm/variants.txt`](slurm/variants.txt). The raw result rows are in
+[`results/`](results).
