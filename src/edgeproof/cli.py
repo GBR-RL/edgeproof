@@ -242,6 +242,31 @@ def gpu(
 
 
 @app.command()
+def gate(
+    config: Annotated[Path, typer.Option(help="Gate definition (YAML).")] = Path("perf/gate.yaml"),
+    out: Annotated[Path, typer.Option(help="Result rows (JSON lines).")] = RESULTS / "gate.jsonl",
+    summary: Annotated[Path | None, typer.Option(help="Append the Markdown table here.")] = None,
+) -> None:
+    """Build, measure and check every variant of the gate; exit 1 if any regresses."""
+    from edgeproof import gate as g
+
+    spec = g.load(config)
+    rows = []
+    for variant in spec.variants:
+        typer.echo(f"== {variant.name}: edgeproof {' '.join(variant.args)}")
+        app([*variant.args, "--out", str(out)], standalone_mode=False)
+        last = out.read_text(encoding="utf-8").splitlines()[-1]
+        rows.append((variant, json.loads(last)))
+    table = g.summary(spec, rows)
+    typer.echo(table)
+    if summary is not None:
+        with summary.open("a", encoding="utf-8") as f:
+            f.write(table + "\n")
+    if any(g.failures(spec, variant, row) for variant, row in rows):
+        raise typer.Exit(1)
+
+
+@app.command()
 def report(
     accuracy: Annotated[Path, typer.Option(help="Accuracy rows (JSON lines).")] = (
         RESULTS / "accuracy.jsonl"

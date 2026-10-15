@@ -1,0 +1,9 @@
+# The versions the results in this repository were measured with (CLAIX CPU environment).
+ultralytics==8.4.175
+onnx==1.23.2
+onnxslim==0.1.98
+onnxruntime==1.31.0
+openvino==2026.4.1
+nncf==3.4.0
+torch==2.14.1
+torchvision==0.29.1

@@ -1,0 +1,29 @@
+# CI performance gate (`edgeproof gate`). Every variant is rebuilt from the trained checkpoint,
+# timed on the runner (4 threads, batch 1, the network alone) and evaluated on the 960 test
+# images. References are the accuracies measured on the cluster (results/accuracy.jsonl); budgets
+# sit about 1.5x above what the shared GitHub runners measure.
+tolerance:
+  map50: 0.01   # one INT8 variant against another differs by about this much
+  recall: 0.03  # 7 of 240 defective test images
+
+variants:
+  - name: YOLO26s ONNX Runtime FP32
+    args: bench --name yolo26s-det-1024 --head e2e --runtimes onnxruntime
+    map50: 0.415
+    recall: 0.779
+  - name: YOLO26s OpenVINO FP32
+    args: bench --name yolo26s-det-1024 --head e2e --runtimes openvino
+    map50: 0.415
+    recall: 0.779
+  - name: YOLO26s OpenVINO INT8
+    args: ptq --name yolo26s-det-1024 --head e2e --runtime openvino --method performance
+    map50: 0.415
+    recall: 0.771
+  - name: YOLO26s ONNX Runtime INT8, head in float
+    args: ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method minmax --keep-head
+    map50: 0.399
+    recall: 0.771
+  - name: YOLO11s OpenVINO INT8, decoding in float
+    args: ptq --name yolo11s-det-1024 --head nms --runtime openvino --method performance --float-decode
+    map50: 0.386
+    recall: 0.775
