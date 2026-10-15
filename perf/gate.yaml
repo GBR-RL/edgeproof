@@ -32,7 +32,7 @@ variants:
     recall: 0.771
     budget_ms: {x86_64: 250}
     archs: [x86_64]
-  # ONNX Runtime's INT8 kernels for ARM64 round differently: the same quantized model catches
+  # ONNX Runtime's INT8 kernels for ARM64 round differently: the same recipe catches
   # 0.738 of the defective images there. References measured on the Neoverse-N2 runner.
   - name: YOLO26s ONNX Runtime INT8, head in float (ARM64 kernels)
     args: ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method minmax --keep-head
