@@ -125,6 +125,52 @@ def train(
     return summary
 
 
+def finetune(
+    name: str,
+    models: Path,
+    yolo_dir: Path,
+    *,
+    qat: bool,
+    epochs: int = 10,
+    lr0: float = 2e-4,
+    device: str | None = None,
+    workers: int = 8,
+    fraction: float = 1.0,
+) -> dict[str, Any]:
+    """Continues training the baseline ``name`` for a few epochs, with INT8 fake quantization
+    (quantization-aware training, saved as ``<name>-qat``) or without (``<name>-ft``). The second is
+    the control: it separates what QAT recovers from what training longer alone would.
+
+    Ultralytics calibrates the quantizer ranges on a few training batches, then trains the weights
+    against them, with batch norm unfused until export. AdamW at a tenth of the baseline's learning
+    rate, no warm-up, no mosaic (the baseline's last epochs ran without it as well)."""
+    from ultralytics import YOLO  # type: ignore[attr-defined,unused-ignore]
+
+    parent = json.loads((models / f"{name}.json").read_text())
+    recipe = Recipe(**parent["recipe"])
+    out = f"{name}-{'qat' if qat else 'ft'}"
+    device = pick_device(device)
+    data_yaml = yolo_dir / recipe.task / "data.yaml"
+    runs = models / "runs"
+    args = train_args(recipe, data_yaml, runs, device=device, workers=workers, fraction=fraction)
+    schedule = {"epochs": epochs, "optimizer": "AdamW", "lr0": lr0, "warmup_epochs": 0,
+                "close_mosaic": epochs, "patience": epochs}  # fmt: skip
+    YOLO(str(models / f"{name}.pt")).train(
+        **args | schedule | {"name": out, "quantize": 8 if qat else None}
+    )
+    shutil.copy2(runs / out / "weights" / "best.pt", models / f"{out}.pt")
+    summary = {
+        "recipe": asdict(recipe),
+        "parent": name,
+        "finetune": schedule | {"qat": qat},
+        "device": device,
+        "fraction": fraction,
+        "test": evaluate(models / f"{out}.pt", data_yaml, recipe.imgsz, device),
+    }
+    (models / f"{out}.json").write_text(json.dumps(summary, indent=2) + "\n")
+    return summary
+
+
 def evaluate(
     weights: Path, data_yaml: Path, imgsz: int, device: str | None = None, split: str = "test"
 ) -> dict[str, float]:
