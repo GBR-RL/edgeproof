@@ -18,7 +18,9 @@ def test_load_splits_the_command(tmp_path: Path) -> None:
     gate = load(config)
     assert gate.map50_tolerance == 0.02
     assert gate.recall_tolerance == 0.03
-    (v,) = gate.variants
+    v, x86_only = gate.variants
+    assert v.runs_on("aarch64") and v.runs_on("x86_64")
+    assert x86_only.runs_on("x86_64") and not x86_only.runs_on("aarch64")
     assert v.args == ["bench", "--name", "m", "--runtimes", "openvino"]
     assert v.budget_ms == {"aarch64": 300}
     assert v.recall is None
