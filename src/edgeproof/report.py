@@ -73,6 +73,24 @@ def fp32_table(rows: list[Row]) -> str:
     return "\n".join(lines)
 
 
+def _ordered(rows: list[Row]) -> list[Row]:
+    """Variants grouped by model, head and runtime in the order of the FP32 table, then by how
+    they were quantized: tables stay readable however the result files were appended."""
+    first: dict[tuple[str, ...], int] = {}
+    for r in rows:
+        first.setdefault(key(r)[:3], len(first))
+    scopes = list(SCOPES)
+
+    def rank(r: Row) -> tuple[Any, ...]:
+        tag = TAG.fullmatch(r["precision"])
+        if tag is None:
+            return first[key(r)[:3]], ()
+        return first[key(r)[:3]], (tag["method"], tag["channel"] or "", int(tag["n"]),
+                                   scopes.index(tag["scope"]))  # fmt: skip
+
+    return sorted(rows, key=rank)
+
+
 def _speedup(base: float | None, value: float | None) -> str:
     return f"{base / value:.1f}x" if base and value else "-"
 
@@ -91,7 +109,7 @@ def int8_table(rows: list[Row]) -> str:
         "| mAP50-95 (vs FP32) | Mask mAP50 (vs FP32) | Recall @ 1% false alarms | Size MB |",
         "|---|---|---|---|---|--:|--:|--:|--:|--:|--:|--:|",
     ]
-    for r in rows:
+    for r in _ordered(rows):
         tag = TAG.fullmatch(r["precision"])
         if tag is None:
             continue
@@ -118,7 +136,7 @@ def bf16_table(rows: list[Row]) -> str:
         "| mAP50-95 (vs FP32) | Mask mAP50 (vs FP32) | Recall @ 1% false alarms |",
         "|---|---|--:|--:|--:|--:|--:|--:|--:|",
     ]
-    for r in rows:
+    for r in _ordered(rows):
         if r["precision"] != "bf16":
             continue
         fp32 = base.get(key(r)[:3], {})

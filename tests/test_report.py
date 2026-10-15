@@ -39,10 +39,30 @@ def test_int8_rows_name_the_scope_calibration_size_and_mask() -> None:
         _row("int8-percentile-pc-decodefp-c512", runtime="onnxruntime", p50_ms=50.0),
         _row("int8-performance-full-c32", p50_ms=25.0, mask_map50=0.4),
     ]
-    ort, ov = int8_table(rows).splitlines()[2:]
+    ov, ort = int8_table(rows).splitlines()[2:]  # grouped in the order runtimes first appear
     assert "| percentile, 512 images | INT8, decoding in float | 50 | - |" in ort
     assert "| performance, 32 images | INT8 | 25 | 4.0x |" in ov
     assert "| 0.400 (-0.010) | 0.80 |" in ov
+
+
+def test_int8_rows_are_grouped_by_variant_whatever_the_file_order() -> None:
+    rows = [
+        _row("fp32"),
+        _row("fp32", runtime="onnxruntime"),
+        _row("int8-percentile-pc-headfp-c128", runtime="onnxruntime"),
+        _row("int8-performance-full-c512"),
+        _row("int8-performance-full-c32"),
+        _row("int8-performance-decodefp-c128"),
+        _row("int8-performance-full-c128"),
+    ]
+    order = [line.split(" | ")[3:5] for line in int8_table(rows).splitlines()[2:]]
+    assert order == [
+        ["performance, 32 images", "INT8"],
+        ["performance", "INT8"],
+        ["performance", "INT8, decoding in float"],
+        ["performance, 512 images", "INT8"],
+        ["percentile", "float"],
+    ]
 
 
 def test_bf16_rows_compare_with_fp32_openvino() -> None:
