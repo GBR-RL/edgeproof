@@ -86,7 +86,7 @@ def _engine_runner(path: Path, imgsz: int) -> Callable[[], None]:
             tensor = torch.empty(shape, dtype=dtype, device="cuda")
         context.set_tensor_address(name, tensor.data_ptr())
         buffers.append(tensor)
-    stream = torch.cuda.Stream()  # type: ignore[no-untyped-call]
+    stream = torch.cuda.Stream()  # type: ignore[no-untyped-call,unused-ignore]
 
     def run() -> None:
         context.execute_async_v3(stream.cuda_stream)
