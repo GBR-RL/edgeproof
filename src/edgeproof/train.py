@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -133,6 +133,7 @@ def finetune(
     qat: bool,
     epochs: int = 10,
     lr0: float = 2e-4,
+    batch: int | None = None,
     device: str | None = None,
     workers: int = 8,
     fraction: float = 1.0,
@@ -148,6 +149,8 @@ def finetune(
 
     parent = json.loads((models / f"{name}.json").read_text())
     recipe = Recipe(**parent["recipe"])
+    if batch is not None:
+        recipe = replace(recipe, batch=batch)
     out = f"{name}-{'qat' if qat else 'ft'}"
     device = pick_device(device)
     data_yaml = yolo_dir / recipe.task / "data.yaml"
