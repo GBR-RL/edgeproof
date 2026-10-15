@@ -1,6 +1,6 @@
 from typing import Any
 
-from edgeproof.report import TAG, bf16_table, fp32_table, int8_table, join
+from edgeproof.report import TAG, bf16_table, fp32_table, gpu_table, int8_table, join
 
 
 def _row(precision: str, runtime: str = "openvino", **kw: Any) -> dict[str, Any]:
@@ -72,3 +72,17 @@ def test_tag_parses_every_ptq_variant() -> None:
 def test_rounding_to_zero_has_no_sign_flip() -> None:
     rows = [_row("fp32", box_map50=0.41509), _row("int8-performance-full-c128", box_map50=0.41491)]
     assert "0.415 (+0.000)" in int8_table(rows)
+
+
+def test_gpu_rows_compare_with_pytorch_of_the_baseline() -> None:
+    rows = [
+        _row("fp32", runtime="torch", p50_ms=8.0, p99_ms=8.5),
+        _row("int8", runtime="tensorrt", p50_ms=2.0, p99_ms=2.1, box_map50=0.41),
+        _row("int8", runtime="tensorrt", model="m-qat", p50_ms=2.0, p99_ms=2.1),
+    ]
+    lines = gpu_table(rows).splitlines()
+    assert lines[3] == (
+        "| m | NMS-free | baseline | TensorRT INT8 | 2.00 | 2.10 | 4.0x | 0.410 (+0.010) "
+        "| 0.200 (+0.000) | - | 0.80 | 38.5 |"
+    )
+    assert lines[4].startswith("| m | NMS-free | +10 epochs QAT | TensorRT INT8 | 2.00 |")

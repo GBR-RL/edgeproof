@@ -130,3 +130,40 @@ def bf16_table(rows: list[Row]) -> str:
             f"| {_f(r['recall_at_far0.01'], 2)} |"
         )
     return "\n".join(lines)
+
+
+def _training(model: str) -> tuple[str, str]:
+    """Baseline name and how the model was trained, from the name finetune gives it."""
+    for suffix, label in (("-qat", "+10 epochs QAT"), ("-ft", "+10 epochs")):
+        if model.endswith(suffix):
+            return model.removesuffix(suffix), label
+    return model, "baseline"
+
+
+GPU_ROUTES = {("torch", "fp32"): "PyTorch FP32", ("torch", "int8-sim"): "PyTorch, INT8 simulated",
+              ("tensorrt", "fp32"): "TensorRT FP32", ("tensorrt", "fp16"): "TensorRT FP16",
+              ("tensorrt", "int8"): "TensorRT INT8"}  # fmt: skip
+
+
+def gpu_table(rows: list[Row]) -> str:
+    """GPU rows, each against PyTorch FP32 of the same baseline and head."""
+    base = {(r["model"], r["head"]): r for r in rows
+            if (r["runtime"], r["precision"]) == ("torch", "fp32")}  # fmt: skip
+    lines = [
+        "| Model | Head | Training | Route | p50 ms | p99 ms | Speed-up | mAP50 (vs PyTorch) "
+        "| mAP50-95 (vs PyTorch) | Mask mAP50 | Recall @ 1% false alarms | Size MB |",
+        "|---|---|---|---|--:|--:|--:|--:|--:|--:|--:|--:|",
+    ]
+    for r in rows:
+        model, training = _training(r["model"])
+        ref = base.get((model, r["head"]), {})
+        route = GPU_ROUTES[r["runtime"], r["precision"]]
+        lines.append(
+            f"| {model} | {HEADS[r['head']]} | {training} | {route} "
+            f"| {_f(r['p50_ms'], 2)} | {_f(r['p99_ms'], 2)} "
+            f"| {_speedup(ref.get('p50_ms'), r['p50_ms'])} "
+            f"| {_delta(r['box_map50'], ref.get('box_map50'))} "
+            f"| {_delta(r['box_map50_95'], ref.get('box_map50_95'))} | {_f(r.get('mask_map50'))} "
+            f"| {_f(r['recall_at_far0.01'], 2)} | {r['size_mb']:.1f} |"
+        )
+    return "\n".join(lines)

@@ -78,6 +78,24 @@ def train(
     typer.echo(json.dumps(summary["test"]))
 
 
+@app.command()
+def finetune(
+    name: Annotated[str, typer.Option(help="Trained baseline, e.g. yolo26s-det-1024.")],
+    qat: Annotated[bool, typer.Option(help="With INT8 fake quantization (QAT).")] = True,
+    epochs: Annotated[int, typer.Option(help="Epochs.")] = 10,
+    lr0: Annotated[float, typer.Option(help="Initial AdamW learning rate.")] = 2e-4,
+    workers: Annotated[int, typer.Option(help="Data loader processes.")] = 8,
+    fraction: Annotated[float, typer.Option(help="Share of the training set (smoke tests).")] = 1.0,
+    device: Annotated[str | None, typer.Option(help="auto, cpu, cuda, cuda:1, mps.")] = None,
+) -> None:
+    """Continue training a baseline with quantization-aware training, or without as a control."""
+    from edgeproof.train import finetune as run
+
+    summary = run(name, MODELS, YOLO_DATA, qat=qat, epochs=epochs, lr0=lr0, device=device,
+                  workers=workers, fraction=fraction)  # fmt: skip
+    typer.echo(json.dumps(summary["test"]))
+
+
 def _measure(
     name: str, runtime: str, precision: str, path: Path, *, head: str, threads: int, runs: int,
     accuracy: bool, out: Path, compute: str = "fp32",
@@ -180,6 +198,49 @@ def ptq(
 
 
 @app.command()
+def gpu(
+    name: Annotated[str, typer.Option(help="Trained model, e.g. yolo26s-det-1024 or -qat.")],
+    runtime: Annotated[str, typer.Option(help="tensorrt or torch.")] = "tensorrt",
+    precision: Annotated[str, typer.Option(help="fp32, fp16 or int8 (TensorRT).")] = "fp16",
+    head: HeadOpt = "e2e",
+    runs: Annotated[int, typer.Option(help="Timed runs.")] = 1000,
+    skip_accuracy: SkipAccuracy = False,
+    out: Out = None,
+) -> None:
+    """Measure a model on the GPU: a TensorRT engine, or PyTorch for reference. INT8 engines of a
+    QAT model (``-qat``) take its trained ranges; of any other model, PTQ ranges."""
+    import platform
+
+    from edgeproof import bench as b
+    from edgeproof import gpu as g
+    from edgeproof.export import size_mb
+
+    summary = json.loads((MODELS / f"{name}.json").read_text())
+    imgsz, task = summary["recipe"]["imgsz"], summary["recipe"]["task"]
+    qat = bool(summary.get("finetune", {}).get("qat"))
+    head = _head(name, head)
+    if runtime == "tensorrt":
+        data_yaml = YOLO_DATA / task / "data.yaml"
+        path = g.export_engine(MODELS, name, imgsz, head, precision, data_yaml, qat=qat)  # type: ignore[arg-type]
+    elif runtime == "torch" and precision == "fp32":
+        path, precision = MODELS / f"{name}.pt", "int8-sim" if qat else "fp32"
+    else:
+        raise typer.BadParameter("--runtime tensorrt, or torch with --precision fp32")
+    row: dict[str, Any] = {"model": name, "head": head, "runtime": runtime,
+                           "precision": precision, "cpu": b.cpu_name(),
+                           "arch": platform.machine().lower(),
+                           "size_mb": size_mb(path)}  # fmt: skip
+    row |= g.latency(path, runtime, imgsz, head=head, runs=runs)  # type: ignore[arg-type]
+    if not skip_accuracy:
+        row |= b.accuracy(path, task, YOLO_DATA, imgsz, head=head, device=g.DEVICE)
+    out = out or RESULTS / "gpu.jsonl"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+    typer.echo(json.dumps(row))
+
+
+@app.command()
 def report(
     accuracy: Annotated[Path, typer.Option(help="Accuracy rows (JSON lines).")] = (
         RESULTS / "accuracy.jsonl"
@@ -187,12 +248,16 @@ def report(
     latency: Annotated[Path, typer.Option(help="Whole-node latency rows (JSON lines).")] = (
         RESULTS / "latency.jsonl"
     ),
+    gpu: Annotated[Path, typer.Option(help="GPU rows (JSON lines).")] = RESULTS / "gpu.jsonl",
 ) -> None:
-    """Print the FP32, BF16 and INT8 result tables as Markdown."""
+    """Print the FP32, BF16, INT8 and GPU result tables as Markdown."""
     from edgeproof import report as r
 
     rows = r.join(r.load(accuracy), r.load(latency) if latency.exists() else [])
-    typer.echo("\n\n".join((r.fp32_table(rows), r.bf16_table(rows), r.int8_table(rows))))
+    tables = [r.fp32_table(rows), r.bf16_table(rows), r.int8_table(rows)]
+    if gpu.exists():
+        tables.append(r.gpu_table(r.load(gpu)))
+    typer.echo("\n\n".join(tables))
 
 
 @app.command()
