@@ -1,0 +1,32 @@
+# Every GPU variant, one edgeproof command per line (read by gpu.sbatch). INT8 of a -qat model
+# takes its trained ranges; of any other model, PTQ ranges.
+
+# YOLO26s detection, NMS-free head
+gpu --name yolo26s-det-1024 --head e2e --runtime torch --precision fp32
+gpu --name yolo26s-det-1024 --head e2e --precision fp32
+gpu --name yolo26s-det-1024 --head e2e --precision fp16
+gpu --name yolo26s-det-1024 --head e2e --precision int8
+gpu --name yolo26s-det-1024-ft --head e2e --precision int8
+gpu --name yolo26s-det-1024-qat --head e2e --runtime torch --precision fp32
+gpu --name yolo26s-det-1024-qat --head e2e --precision int8
+
+# YOLO26s detection, NMS head
+gpu --name yolo26s-det-1024 --head nms --runtime torch --precision fp32
+gpu --name yolo26s-det-1024 --head nms --precision fp16
+gpu --name yolo26s-det-1024 --head nms --precision int8
+gpu --name yolo26s-det-1024-qat --head nms --precision int8
+
+# YOLO11s detection
+gpu --name yolo11s-det-1024 --head nms --runtime torch --precision fp32
+gpu --name yolo11s-det-1024 --head nms --precision fp32
+gpu --name yolo11s-det-1024 --head nms --precision fp16
+gpu --name yolo11s-det-1024 --head nms --precision int8
+gpu --name yolo11s-det-1024-ft --head nms --precision int8
+gpu --name yolo11s-det-1024-qat --head nms --runtime torch --precision fp32
+gpu --name yolo11s-det-1024-qat --head nms --precision int8
+
+# Segmentation in FP16
+gpu --name yolo26s-seg-1024 --head e2e --runtime torch --precision fp32
+gpu --name yolo26s-seg-1024 --head e2e --precision fp16
+gpu --name yolo11s-seg-1024 --head nms --runtime torch --precision fp32
+gpu --name yolo11s-seg-1024 --head nms --precision fp16

@@ -67,5 +67,5 @@ def export(models: Path, name: str, runtime: Runtime, imgsz: int, head: Head = "
 
 def size_mb(path: Path) -> float:
     files = [path] if path.is_file() else [p for p in path.rglob("*") if p.is_file()]
-    weights = [p for p in files if p.suffix in {".pt", ".onnx", ".bin", ".xml"}]
+    weights = [p for p in files if p.suffix in {".pt", ".onnx", ".bin", ".xml", ".engine"}]
     return round(sum(p.stat().st_size for p in weights) / 1e6, 2)

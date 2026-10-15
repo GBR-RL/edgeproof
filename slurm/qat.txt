@@ -1,0 +1,6 @@
+# Quantization-aware training and its control: the same 10 epochs without fake quantization.
+# Read by gpu.sbatch, one edgeproof command per line.
+finetune --name yolo26s-det-1024 --qat --workers 16
+finetune --name yolo26s-det-1024 --no-qat --workers 16
+finetune --name yolo11s-det-1024 --qat --workers 16
+finetune --name yolo11s-det-1024 --no-qat --workers 16

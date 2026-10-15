@@ -148,17 +148,20 @@ def latency(
 def accuracy(
     path: Path, task: str, yolo_dir: Path, imgsz: int, *, head: Head = "e2e",
     fars: tuple[float, ...] = FARS, threads: int | None = None, compute: Compute = "fp32",
+    device: str = "cpu",
 ) -> dict[str, Any]:  # fmt: skip
     """Test-split mAP plus image-level recall at fixed false-alarm rates, through the runtime
     itself, and the median pre- and post-processing time per image. Runs on all usable cores
-    unless ``threads`` is given; latency is measured separately."""
+    unless ``threads`` is given, on the CPU unless ``device`` names a GPU (Ultralytics' "0");
+    latency is measured separately."""
     with pinned(threads or usable_cores(), compute):
-        return _accuracy(path, task, yolo_dir, imgsz, head=head, fars=fars)
+        return _accuracy(path, task, yolo_dir, imgsz, head=head, fars=fars, device=device)
 
 
 def _accuracy(
-    path: Path, task: str, yolo_dir: Path, imgsz: int, *, head: Head, fars: tuple[float, ...]
-) -> dict[str, Any]:
+    path: Path, task: str, yolo_dir: Path, imgsz: int, *, head: Head, fars: tuple[float, ...],
+    device: str,
+) -> dict[str, Any]:  # fmt: skip
     from ultralytics import YOLO  # type: ignore[attr-defined,unused-ignore]
 
     from edgeproof.train import metrics_from
@@ -167,7 +170,7 @@ def _accuracy(
     nms = False if head == "e2e" else None  # None: Ultralytics' default, the NMS head
     result = model.val(
         data=str(yolo_dir / task / "data.yaml"), split="test", imgsz=imgsz, batch=1,
-        device="cpu", nms=nms, plots=False, verbose=False,
+        device=device, nms=nms, plots=False, verbose=False,
     )  # fmt: skip
     out: dict[str, Any] = metrics_from(result.results_dict)
     defects: list[float] = []
@@ -176,7 +179,7 @@ def _accuracy(
     post: list[float] = []
     # A folder, not a list of paths: Ultralytics runs a list as one batch, all test images at once.
     images = yolo_dir / task / "images" / "test"
-    for r in model.predict(str(images), imgsz=imgsz, batch=1, conf=0.001, device="cpu",
+    for r in model.predict(str(images), imgsz=imgsz, batch=1, conf=0.001, device=device,
                            nms=nms, stream=True, verbose=False):  # fmt: skip
         score = float(r.boxes.conf.max()) if len(r.boxes) else 0.0
         (defects if "_defect_" in Path(r.path).name else normals).append(score)
