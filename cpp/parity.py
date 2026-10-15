@@ -15,6 +15,8 @@ import numpy as np
 
 from edgeproof.bench import pinned
 
+STAGES = ("preprocess_ms", "inference_ms", "postprocess_ms", "total_ms")
+
 
 def iou(a: np.ndarray, b: np.ndarray) -> float:
     w = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
@@ -71,8 +73,8 @@ def main() -> None:
             boxes = r.boxes
             py = np.concatenate([boxes.xyxy.numpy(), boxes.conf.numpy()[:, None]], axis=1)
             stats.append(compare(cpp[Path(r.path).name], py.tolist()))
-            for k in speeds:
-                speeds[k].append(r.speed[k])
+            for k, times in speeds.items():
+                times.append(r.speed[k])
     n = len(stats)
     same = sum(s["cpp"] == s["python"] == s["matched"] for s in stats)
     python = {f"{k}_ms": round(float(np.median(v)), 2) for k, v in speeds.items()}
@@ -84,8 +86,7 @@ def main() -> None:
         "max_box_diff_px": round(max(s["box"] for s in stats), 3),
         "max_score_diff": round(max(s["score"] for s in stats), 5),
         "python": python,
-        "cpp": {k: timing[k] for k in ("preprocess_ms", "inference_ms", "postprocess_ms",
-                                       "total_ms")},  # fmt: skip
+        "cpp": {k: timing[k] for k in STAGES},
     }
     args.out.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report))
