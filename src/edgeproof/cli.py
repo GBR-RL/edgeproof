@@ -250,11 +250,17 @@ def gate(
     summary: Annotated[Path | None, typer.Option(help="Append the Markdown table here.")] = None,
 ) -> None:
     """Build, measure and check every variant of the gate; exit 1 if any regresses."""
+    import platform
+
     from edgeproof import gate as g
 
     spec = g.load(config)
+    arch = platform.machine().lower()
     rows = []
     for variant in spec.variants:
+        if not variant.runs_on(arch):
+            typer.echo(f"== {variant.name}: not on {arch}")
+            continue
         typer.echo(f"== {variant.name}: edgeproof {' '.join(variant.args)}")
         app([*variant.args, "--out", str(out)], standalone_mode=False)
         last = out.read_text(encoding="utf-8").splitlines()[-1]

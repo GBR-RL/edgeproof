@@ -25,6 +25,10 @@ class Variant:
     map50: float | None = None  # reference, None: latency only
     recall: float | None = None
     budget_ms: dict[str, float] = field(default_factory=dict)  # per architecture
+    archs: tuple[str, ...] = ()  # where it runs; empty: everywhere
+
+    def runs_on(self, arch: str) -> bool:
+        return not self.archs or arch in self.archs
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +50,7 @@ def load(path: Path) -> Gate:
             map50=v.get("map50"),
             recall=v.get("recall"),
             budget_ms=v.get("budget_ms", {}),
+            archs=tuple(v.get("archs", ())),
         )
         for v in cfg["variants"]
     ]
