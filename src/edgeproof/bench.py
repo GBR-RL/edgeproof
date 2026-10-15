@@ -6,7 +6,8 @@ separately from Ultralytics' own per-stage timing: NMS is exactly the cost YOLO2
 
 Every runtime runs in FP32 on a set number of threads. Neither holds by default: OpenVINO computes
 in bfloat16 on CPUs with AMX (Xeon Sapphire Rapids and newer), and ONNX Runtime sizes its thread
-pool for all cores of the machine, not the cores a Slurm job may use.
+pool for all cores of the machine, not the cores a Slurm job may use. OpenVINO's bfloat16 is
+measured as a precision of its own.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import patch
 
 import numpy as np
@@ -25,10 +26,12 @@ from edgeproof.export import Head, Runtime
 from edgeproof.metrics import recall_at_far
 
 FARS = (0.01, 0.05)
+Compute = Literal["fp32", "bf16"]  # what OpenVINO computes the float operations in
+OV_PRECISION = {"fp32": "f32", "bf16": "bf16"}
 
 
-def ov_config(threads: int) -> dict[str, Any]:
-    return {"INFERENCE_NUM_THREADS": threads, "INFERENCE_PRECISION_HINT": "f32"}
+def ov_config(threads: int, compute: Compute = "fp32") -> dict[str, Any]:
+    return {"INFERENCE_NUM_THREADS": threads, "INFERENCE_PRECISION_HINT": OV_PRECISION[compute]}
 
 
 def usable_cores() -> int:
@@ -39,8 +42,9 @@ def usable_cores() -> int:
 
 
 @contextmanager
-def pinned(threads: int) -> Iterator[None]:
-    """Sessions that Ultralytics opens inside this block run in FP32 on ``threads`` threads."""
+def pinned(threads: int, compute: Compute = "fp32") -> Iterator[None]:
+    """Sessions that Ultralytics opens inside this block run on ``threads`` threads, in FP32
+    (OpenVINO in ``compute``)."""
     with ExitStack() as stack:
         try:
             import onnxruntime as ort
@@ -67,7 +71,7 @@ def pinned(threads: int) -> Iterator[None]:
 
             class Core(ov.Core):  # type: ignore[misc,unused-ignore]
                 def compile_model(self, *args: Any, config: Any = None, **kwargs: Any) -> Any:
-                    config = {**(config or {}), **ov_config(threads)}
+                    config = {**(config or {}), **ov_config(threads, compute)}
                     return super().compile_model(*args, config=config, **kwargs)
 
             stack.enter_context(patch.object(ov, "Core", Core))
@@ -83,7 +87,7 @@ def pinned(threads: int) -> Iterator[None]:
 
 
 def _runner(
-    path: Path, runtime: Runtime, imgsz: int, threads: int, head: Head
+    path: Path, runtime: Runtime, imgsz: int, threads: int, head: Head, compute: Compute
 ) -> Callable[[], Any]:
     x = np.random.default_rng(0).random((1, 3, imgsz, imgsz), dtype=np.float32)
     if runtime == "onnxruntime":
@@ -99,7 +103,7 @@ def _runner(
 
         xml = next(path.glob("*.xml"))
         compiled = ov.Core().compile_model(
-            str(xml), "CPU", {**ov_config(threads), "PERFORMANCE_HINT": "LATENCY"}
+            str(xml), "CPU", {**ov_config(threads, compute), "PERFORMANCE_HINT": "LATENCY"}
         )
         request = compiled.create_infer_request()
         return lambda: request.infer({0: x})
@@ -121,10 +125,10 @@ def _runner(
 
 def latency(
     path: Path, runtime: Runtime, imgsz: int, *, head: Head = "e2e", threads: int = 4,
-    runs: int = 100, warmup: int = 10,
+    runs: int = 100, warmup: int = 10, compute: Compute = "fp32",
 ) -> dict[str, float]:  # fmt: skip
     """Milliseconds per image for the network alone, batch 1."""
-    run = _runner(path, runtime, imgsz, threads, head)
+    run = _runner(path, runtime, imgsz, threads, head, compute)
     for _ in range(warmup):
         run()
     times = []
@@ -143,12 +147,12 @@ def latency(
 
 def accuracy(
     path: Path, task: str, yolo_dir: Path, imgsz: int, *, head: Head = "e2e",
-    fars: tuple[float, ...] = FARS, threads: int | None = None,
+    fars: tuple[float, ...] = FARS, threads: int | None = None, compute: Compute = "fp32",
 ) -> dict[str, Any]:  # fmt: skip
     """Test-split mAP plus image-level recall at fixed false-alarm rates, through the runtime
     itself, and the median pre- and post-processing time per image. Runs on all usable cores
     unless ``threads`` is given; latency is measured separately."""
-    with pinned(threads or usable_cores()):
+    with pinned(threads or usable_cores(), compute):
         return _accuracy(path, task, yolo_dir, imgsz, head=head, fars=fars)
 
 
