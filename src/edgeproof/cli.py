@@ -221,7 +221,7 @@ def gpu(
     head = _head(name, head)
     if runtime == "tensorrt":
         data_yaml = YOLO_DATA / task / "data.yaml"
-        path = g.export_engine(MODELS, name, imgsz, head, precision, data_yaml, qat=qat)  # type: ignore[arg-type]
+        path = g.export_engine(MODELS, name, imgsz, head, precision, data_yaml=data_yaml, qat=qat)  # type: ignore[arg-type]
     elif runtime == "torch" and precision == "fp32":
         path, precision = MODELS / f"{name}.pt", "int8-sim" if qat else "fp32"
     else:
@@ -232,7 +232,7 @@ def gpu(
                            "size_mb": size_mb(path)}  # fmt: skip
     row |= g.latency(path, runtime, imgsz, head=head, runs=runs)  # type: ignore[arg-type]
     if not skip_accuracy:
-        row |= b.accuracy(path, task, YOLO_DATA, imgsz, head=head, device=g.DEVICE)
+        row |= b.accuracy(path, task, YOLO_DATA, imgsz, head=head, device=g.DEVICE)  # type: ignore[arg-type]
     out = out or RESULTS / "gpu.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("a", encoding="utf-8") as f:

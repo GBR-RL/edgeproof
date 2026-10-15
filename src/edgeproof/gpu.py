@@ -37,8 +37,8 @@ def engine_path(models: Path, name: str, head: Head, precision: Precision) -> Pa
 
 
 def export_engine(
-    models: Path, name: str, imgsz: int, head: Head, precision: Precision, data_yaml: Path,
-    *, qat: bool = False,
+    models: Path, name: str, imgsz: int, head: Head, precision: Precision, *, data_yaml: Path,
+    qat: bool = False,
 ) -> Path:  # fmt: skip
     """Builds the TensorRT engine of ``models/<name>.pt`` unless it exists. PTQ calibrates on the
     training split (shuffled with a fixed seed; ModelOpt takes the first 512 images)."""
@@ -50,7 +50,8 @@ def export_engine(
     target.parent.mkdir(parents=True, exist_ok=True)
     source = target.with_suffix(".pt")
     shutil.copy2(models / f"{name}.pt", source)
-    calibration = {"data": str(data_yaml), "split": "train"} if precision == "int8" and not qat else {}
+    ptq = precision == "int8" and not qat
+    calibration = {"data": str(data_yaml), "split": "train"} if ptq else {}
     from ultralytics import YOLO  # type: ignore[attr-defined,unused-ignore]
 
     YOLO(str(source)).export(
@@ -85,7 +86,7 @@ def _engine_runner(path: Path, imgsz: int) -> Callable[[], None]:
             tensor = torch.empty(shape, dtype=dtype, device="cuda")
         context.set_tensor_address(name, tensor.data_ptr())
         buffers.append(tensor)
-    stream = torch.cuda.Stream()
+    stream = torch.cuda.Stream()  # type: ignore[no-untyped-call]
 
     def run() -> None:
         context.execute_async_v3(stream.cuda_stream)
