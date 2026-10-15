@@ -21,5 +21,6 @@ cp -a "$BASE/data/yolo" "$LOCAL/"
 sed -i "s#^path: .*/yolo/#path: $LOCAL/yolo/#" "$LOCAL"/yolo/*/data.yaml
 grep -v '^\s*\(#\|$\)' "$1" | while read -r -a cmd; do
   echo "== edgeproof ${cmd[*]}"
-  EDGEPROOF_YOLO_DATA="$LOCAL/yolo" edgeproof "${cmd[@]}" < /dev/null
+  # A failed variant is reported and skipped; the allocation goes on to the next one.
+  EDGEPROOF_YOLO_DATA="$LOCAL/yolo" edgeproof "${cmd[@]}" < /dev/null || echo "== FAILED (exit $?)"
 done

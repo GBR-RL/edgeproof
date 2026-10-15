@@ -11,5 +11,5 @@ source "$BASE/venv-gpu/bin/activate"
 pip install -q --upgrade pip
 pip install -q torch==2.14.1 torchvision==0.29.1 ultralytics==8.4.175 onnxslim==0.1.98 \
   "nvidia-modelopt[onnx]==0.47.0" huggingface_hub tensorrt==11.4.0.106
-pip install -q -e "$BASE/repo[train]"
+pip install -q -e "${EDGEPROOF_REPO:-$BASE/repo}[train]"  # a checkout of its own while CPU jobs use repo/
 python -c "import torch, tensorrt, modelopt, ultralytics; print(torch.__version__, torch.version.cuda, tensorrt.__version__, modelopt.__version__, ultralytics.__version__)"
