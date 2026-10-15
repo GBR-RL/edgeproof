@@ -96,14 +96,14 @@ than 0.01 and 0.03), when an INT8 variant is not a minimum factor faster than FP
 run, or when FP32 exceeds a generous budget for the CPU architecture. The
 [performance workflow](.github/workflows/perf.yml) runs it on GitHub's 4-vCPU x86-64 and ARM64
 runners for every pull request that touches the code. YOLO26s, NMS-free head, 4 threads, p50 ms
-and mAP50 on three runner CPUs:
+and mAP50 on the four runner CPUs seen:
 
-| Variant | x86-64 Zen 4 (EPYC 9V74) | x86-64 Zen 3 (EPYC 7763) | ARM64 (Neoverse-N2) |
-|---|--:|--:|--:|
-| ONNX Runtime FP32 | 271 ms, 0.415 | 365 ms, 0.415 | 345 ms, 0.420 |
-| OpenVINO FP32 | 272 ms, 0.415 | 346 ms, 0.415 | 3,182 ms, 0.420 |
-| ONNX Runtime INT8, head in float | 163 ms, 0.396 | 245 ms, **0.016** | 145 ms, 0.397 |
-| OpenVINO INT8 | 98 ms, 0.414 | 210 ms, 0.417 | - |
+| Variant | x86-64 Xeon 8573C | x86-64 Zen 4 (EPYC 9V74) | x86-64 Zen 3 (EPYC 7763) | ARM64 (Neoverse-N2) |
+|---|--:|--:|--:|--:|
+| ONNX Runtime FP32 | 220 ms, 0.415 | 271 ms, 0.415 | 365 ms, 0.415 | 345 ms, 0.420 |
+| OpenVINO FP32 | 193 ms, 0.415 | 272 ms, 0.415 | 346 ms, 0.415 | 3,182 ms, 0.420 |
+| ONNX Runtime INT8, head in float | 122 ms, 0.396 | 163 ms, 0.396 | 245 ms, **0.016** | 145 ms, 0.397 |
+| OpenVINO INT8 | 64 ms, 0.415 | 98 ms, 0.414 | 210 ms, 0.417 | - |
 
 - **ONNX Runtime INT8 breaks on x86 CPUs without VNNI.** On the Zen 3 runner the same INT8 model
   that scores 0.396 on Zen 4 and 0.399 on the cluster's Xeon detects almost nothing (0.016
@@ -120,10 +120,10 @@ and mAP50 on three runner CPUs:
   on ARM64 against 0.78. Small numeric differences in kernels and resizing move borderline
   detections. The gate therefore checks against a lower bound with a tolerance, and the ARM64
   INT8 variant has references of its own.
-- **Absolute latency budgets do not work on shared runners.** The x86-64 runner was a Zen 3 in
-  one run and a Zen 4 in another, and OpenVINO INT8 took 210 and 98 ms. The gate therefore asks
-  for a speed-up over FP32 measured in the same run (1.3× for INT8 on x86-64, which even Zen 3
-  exceeds at 1.6×), which only fails when quantization stops working.
+- **Absolute latency budgets do not work on shared runners.** The x86-64 runner was a Xeon, a
+  Zen 4 or a Zen 3 from one run to the next, and OpenVINO INT8 took 64, 98 or 210 ms. The gate
+  therefore asks for a speed-up over FP32 measured in the same run (1.3× for INT8 on x86-64; the
+  runners reach 1.6 to 3.0×), which only fails when quantization stops working.
 
 ## A C++ runner
 
