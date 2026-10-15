@@ -33,3 +33,45 @@ ptq --name yolo11s-det-1024 --head nms --runtime openvino --method performance
 ptq --name yolo11s-det-1024 --head nms --runtime openvino --method performance --keep-head
 ptq --name yolo11s-det-1024 --head nms --runtime openvino --method mixed
 ptq --name yolo11s-det-1024 --head nms --runtime openvino --method mixed --keep-head
+
+
+# OpenVINO computing in bfloat16 (AMX)
+bench --name yolo26s-det-1024 --head e2e --runtimes openvino --precision bf16
+bench --name yolo26s-det-1024 --head nms --runtimes openvino --precision bf16
+bench --name yolo11s-det-1024 --head nms --runtimes openvino --precision bf16
+bench --name yolo26s-seg-1024 --head e2e --runtimes openvino --precision bf16
+bench --name yolo26s-seg-1024 --head nms --runtimes openvino --precision bf16
+bench --name yolo11s-seg-1024 --head nms --runtimes openvino --precision bf16
+
+# INT8, only the head's decoding in float
+ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method percentile --float-decode
+ptq --name yolo26s-det-1024 --head e2e --runtime openvino --method performance --float-decode
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method percentile --float-decode
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method entropy --float-decode
+ptq --name yolo11s-det-1024 --head nms --runtime openvino --method performance --float-decode
+
+# INT8 with YOLO26's NMS head
+ptq --name yolo26s-det-1024 --head nms --runtime openvino --method performance
+ptq --name yolo26s-det-1024 --head nms --runtime openvino --method performance --float-decode
+ptq --name yolo26s-det-1024 --head nms --runtime onnxruntime --method percentile --keep-head
+ptq --name yolo26s-det-1024 --head nms --runtime onnxruntime --method percentile --float-decode
+
+# INT8 segmentation
+ptq --name yolo26s-seg-1024 --head e2e --runtime openvino --method performance
+ptq --name yolo26s-seg-1024 --head e2e --runtime openvino --method performance --float-decode
+ptq --name yolo26s-seg-1024 --head e2e --runtime onnxruntime --method percentile --keep-head
+ptq --name yolo26s-seg-1024 --head e2e --runtime onnxruntime --method percentile --float-decode
+ptq --name yolo11s-seg-1024 --head nms --runtime openvino --method performance
+ptq --name yolo11s-seg-1024 --head nms --runtime openvino --method performance --float-decode
+ptq --name yolo11s-seg-1024 --head nms --runtime onnxruntime --method percentile --keep-head
+ptq --name yolo11s-seg-1024 --head nms --runtime onnxruntime --method percentile --float-decode
+
+# Calibration-set size: 32 and 512 images
+ptq --name yolo26s-det-1024 --head e2e --runtime openvino --method performance --calib 32
+ptq --name yolo26s-det-1024 --head e2e --runtime openvino --method performance --calib 512
+ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method percentile --keep-head --calib 32
+ptq --name yolo26s-det-1024 --head e2e --runtime onnxruntime --method percentile --keep-head --calib 512
+ptq --name yolo11s-det-1024 --head nms --runtime openvino --method performance --keep-head --calib 32
+ptq --name yolo11s-det-1024 --head nms --runtime openvino --method performance --keep-head --calib 512
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method entropy --keep-head --calib 32
+ptq --name yolo11s-det-1024 --head nms --runtime onnxruntime --method entropy --keep-head --calib 512
