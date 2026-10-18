@@ -106,3 +106,19 @@ def test_gpu_rows_compare_with_pytorch_of_the_baseline() -> None:
         "| 0.200 (+0.000) | - | 0.80 | 38.5 |"
     )
     assert lines[4].startswith("| m | NMS-free | +10 epochs QAT | TensorRT INT8 | 2.00 |")
+
+
+def test_gpu_rows_group_by_model_however_appended() -> None:
+    rows = [
+        _row("fp32", runtime="torch"),
+        _row("int8", runtime="tensorrt", model="m-qat"),
+        _row("fp32", runtime="torch", model="n"),
+        _row("int8", runtime="tensorrt", model="m-ft"),
+        _row("fp16", runtime="tensorrt"),
+    ]
+    order = [line.split(" | ")[2:4] for line in gpu_table(rows).splitlines()[2:]]
+    assert order == [
+        ["baseline", "PyTorch FP32"], ["baseline", "TensorRT FP16"],
+        ["+10 epochs", "TensorRT INT8"], ["+10 epochs QAT", "TensorRT INT8"],
+        ["baseline", "PyTorch FP32"],
+    ]  # fmt: skip
