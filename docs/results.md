@@ -96,7 +96,7 @@ OpenVINO's CPU plugin computing in bfloat16 on the Xeon's AMX units, from the sa
 
 ## NVIDIA H100
 
-TensorRT 11 engines built by Ultralytics through NVIDIA ModelOpt, against PyTorch FP32 on the GPU. Latency is the engine alone with its input in GPU memory, batch 1, median of 1000 runs; PyTorch is timed the same way. INT8 engines quantize every convolution except the head's output convolutions and the DFL, and keep the rest in FP16. INT8 ranges are calibrated on 512 training images (PTQ).
+TensorRT 11 engines built by Ultralytics through NVIDIA ModelOpt, against PyTorch FP32 on the GPU. Latency is the engine alone with its input in GPU memory, batch 1, median of 1000 runs; PyTorch is timed the same way. INT8 engines quantize every convolution except the head's output convolutions and the DFL, and keep the rest in FP16. "+10 epochs" fine-tunes the baseline in float for 10 more epochs, "+10 epochs QAT" the same with quantization simulated in training; INT8 of a QAT model takes its trained ranges, of any other model ranges calibrated on 512 training images (PTQ).
 
 | Model | Head | Training | Route | p50 ms | p99 ms | Speed-up | mAP50 (vs PyTorch) | mAP50-95 (vs PyTorch) | Mask mAP50 | Recall @ 1% false alarms | Size MB |
 |---|---|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
@@ -104,3 +104,21 @@ TensorRT 11 engines built by Ultralytics through NVIDIA ModelOpt, against PyTorc
 | yolo26s-det-1024 | NMS-free | baseline | TensorRT FP32 | 1.63 | 1.64 | 2.4x | 0.415 (-0.007) | 0.222 (-0.001) | - | 0.77 | 245.0 |
 | yolo26s-det-1024 | NMS-free | baseline | TensorRT FP16 | 1.17 | 1.17 | 3.4x | 0.421 (-0.002) | 0.223 (+0.000) | - | 0.78 | 209.1 |
 | yolo26s-det-1024 | NMS-free | baseline | TensorRT INT8 | 1.07 | 1.07 | 3.7x | 0.398 (-0.025) | 0.210 (-0.013) | - | 0.80 | 96.2 |
+| yolo26s-det-1024 | NMS-free | +10 epochs | TensorRT INT8 | 1.07 | 1.08 | 3.7x | 0.391 (-0.032) | 0.201 (-0.022) | - | 0.67 | 96.1 |
+| yolo26s-det-1024 | NMS-free | +10 epochs QAT | PyTorch, INT8 simulated | 46.68 | 49.93 | 0.1x | 0.412 (-0.010) | 0.218 (-0.005) | - | 0.76 | 20.8 |
+| yolo26s-det-1024 | NMS-free | +10 epochs QAT | TensorRT INT8 | 1.33 | 1.34 | 3.0x | 0.402 (-0.021) | 0.217 (-0.006) | - | 0.72 | 173.2 |
+| yolo26s-det-1024 | NMS | baseline | PyTorch FP32 | 3.88 | 4.37 | 1.0x | 0.437 (+0.000) | 0.235 (+0.000) | - | 0.84 | 20.4 |
+| yolo26s-det-1024 | NMS | baseline | TensorRT FP16 | 1.15 | 1.16 | 3.4x | 0.436 (-0.001) | 0.236 (+0.001) | - | 0.84 | 223.5 |
+| yolo26s-det-1024 | NMS | baseline | TensorRT INT8 | 1.07 | 1.08 | 3.6x | 0.428 (-0.009) | 0.229 (-0.006) | - | 0.84 | 112.3 |
+| yolo26s-det-1024 | NMS | +10 epochs QAT | TensorRT INT8 | 1.36 | 1.37 | 2.9x | 0.428 (-0.009) | 0.234 (-0.001) | - | 0.76 | 191.9 |
+| yolo11s-det-1024 | NMS | baseline | PyTorch FP32 | 3.25 | 3.74 | 1.0x | 0.389 (+0.000) | 0.204 (+0.000) | - | 0.73 | 19.3 |
+| yolo11s-det-1024 | NMS | baseline | TensorRT FP32 | 1.48 | 1.50 | 2.2x | 0.390 (+0.001) | 0.204 (+0.000) | - | 0.75 | 265.4 |
+| yolo11s-det-1024 | NMS | baseline | TensorRT FP16 | 1.07 | 1.08 | 3.0x | 0.388 (-0.001) | 0.202 (-0.002) | - | 0.75 | 223.3 |
+| yolo11s-det-1024 | NMS | baseline | TensorRT INT8 | 1.01 | 1.02 | 3.2x | 0.371 (-0.018) | 0.192 (-0.012) | - | 0.76 | 130.8 |
+| yolo11s-det-1024 | NMS | +10 epochs | TensorRT INT8 | 0.98 | 0.99 | 3.3x | 0.366 (-0.023) | 0.184 (-0.020) | - | 0.70 | 130.8 |
+| yolo11s-det-1024 | NMS | +10 epochs QAT | PyTorch, INT8 simulated | 37.54 | 40.93 | 0.1x | 0.389 (+0.000) | 0.198 (-0.006) | - | 0.75 | 19.6 |
+| yolo11s-det-1024 | NMS | +10 epochs QAT | TensorRT INT8 | 1.21 | 1.30 | 2.7x | 0.390 (+0.001) | 0.199 (-0.006) | - | 0.77 | 192.1 |
+| yolo26s-seg-1024 | NMS-free | baseline | PyTorch FP32 | 5.15 | 5.65 | 1.0x | 0.433 (+0.000) | 0.221 (+0.000) | 0.414 | 0.82 | 23.4 |
+| yolo26s-seg-1024 | NMS-free | baseline | TensorRT FP16 | 1.39 | 1.40 | 3.7x | 0.439 (+0.006) | 0.221 (+0.000) | 0.414 | 0.80 | 211.5 |
+| yolo11s-seg-1024 | NMS | baseline | PyTorch FP32 | 4.18 | 4.54 | 1.0x | 0.427 (+0.000) | 0.230 (+0.000) | 0.410 | 0.83 | 20.6 |
+| yolo11s-seg-1024 | NMS | baseline | TensorRT FP16 | 1.22 | 1.23 | 3.4x | 0.431 (+0.003) | 0.231 (+0.001) | 0.413 | 0.83 | 226.1 |

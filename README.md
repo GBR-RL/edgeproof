@@ -87,30 +87,38 @@ All 18 FP32, 6 BF16 and 49 INT8 variants, segmentation included, are in
 
 ## Results on an NVIDIA H100
 
-YOLO26s detection, NMS-free head, TensorRT 11 engines built through NVIDIA ModelOpt
-([`src/edgeproof/gpu.py`](src/edgeproof/gpu.py)), batch 1, the engine alone:
+TensorRT 11 engines built through NVIDIA ModelOpt ([`src/edgeproof/gpu.py`](src/edgeproof/gpu.py)),
+batch 1, the engine alone. p50 in ms and mAP50 on the 960 test images:
 
-| Route | p50 ms | p99 ms | vs PyTorch | mAP50 | mAP50-95 | Recall @ 1% false alarms | Engine MB |
-|---|--:|--:|--:|--:|--:|--:|--:|
-| PyTorch FP32 | 3.97 | 4.58 | 1.0× | 0.422 | 0.223 | 0.79 | 20.4 |
-| TensorRT FP32 | 1.63 | 1.64 | 2.4× | 0.415 | 0.222 | 0.77 | 245.0 |
-| **TensorRT FP16** | **1.17** | **1.17** | **3.4×** | **0.421** | **0.223** | **0.78** | **209.1** |
-| TensorRT INT8 (PTQ) | 1.07 | 1.07 | 3.7× | 0.398 | 0.210 | 0.80 | 96.2 |
+| Route | YOLO26s NMS-free | | YOLO26s NMS | | YOLO11s NMS | |
+|---|--:|--:|--:|--:|--:|--:|
+| | **ms** | **mAP50** | **ms** | **mAP50** | **ms** | **mAP50** |
+| PyTorch FP32 | 3.97 | 0.422 | 3.88 | 0.437 | 3.25 | 0.389 |
+| TensorRT FP32 | 1.63 | 0.415 | - | - | 1.48 | 0.390 |
+| **TensorRT FP16** | **1.17** | **0.421** | **1.15** | **0.436** | **1.07** | **0.388** |
+| TensorRT INT8, calibrated (PTQ) | 1.07 | 0.398 | 1.07 | 0.428 | 1.01 | 0.371 |
+| PTQ of the model fine-tuned 10 more epochs | 1.07 | 0.391 | - | - | 0.98 | 0.366 |
+| INT8 after 10 epochs of QAT | 1.33 | 0.402 | 1.36 | 0.428 | 1.21 | 0.390 |
 
-- **FP16 is the route on this GPU.** It runs 3.4× faster than PyTorch at FP32's accuracy. INT8
-  adds only 9% on top (1.07 against 1.17 ms): at batch 1 one image of a small model is far from
-  loading the H100, and the INT8 engine keeps every operation outside the convolutions in
-  FP16.
+Every row, with mAP50-95, recall and engine sizes, is in
+[docs/results.md](docs/results.md#nvidia-h100).
+
+- **FP16 is the route on this GPU.** It runs 3.0 to 3.7× faster than PyTorch, within 0.001 mAP50
+  of PyTorch FP32, and the same holds for segmentation: mask mAP50 0.414 against 0.414 for YOLO26s-seg,
+  0.413 against 0.410 for YOLO11s-seg. At batch 1 INT8 saves at most 0.1 ms on top, under 10%.
 - **INT8 after training costs more on TensorRT than on the CPU.** ModelOpt's calibration on 512
-  training images loses 0.017 mAP50 against the TensorRT FP32 engine, where NNCF's INT8 for
-  OpenVINO loses nothing on the same model. Recall at 1% false alarms holds (0.80), so the loss
-  is in box placement, not in finding the defect.
-- **Quantization-aware training costs little accuracy in float.** Ten epochs with INT8 simulated
-  in training against ten epochs of plain fine-tuning from the same checkpoint (test mAP50 in
-  PyTorch): 0.438 against 0.442 for YOLO26s, 0.384 against 0.394 for YOLO11s.
-- PyTorch scores 0.007 higher than the engines for the reason given above (a 960×1024 input
-  against the export's square). TensorRT's FP32 engine may compute in TF32, which is why FP16
-  can land slightly above it.
+  training images loses 0.008 to 0.023 mAP50 against FP16, while NNCF's INT8 for OpenVINO loses
+  nothing on the same YOLO26s.
+- **Quantization-aware training recovers that loss.** Against the fair control, PTQ of a model
+  fine-tuned in float for the same 10 epochs, QAT gains 0.011 mAP50 on YOLO26s and 0.024 on
+  YOLO11s, where it matches the FP32 engine (0.390). But its engines are slower than PTQ's of
+  the same model, and slower than FP16 (1.21 to 1.36 ms), and 1.5 to 1.8 times as large. QAT pays off
+  where INT8 is required, such as on a smaller accelerator without fast FP16; on the H100, FP16
+  is faster and more accurate.
+- Recall at 1% false alarms moves more between INT8 engines than mAP50 (0.67 to 0.84 against
+  0.75 to 0.84 in FP16); compare INT8 engines by mAP50. On the NMS-free head PyTorch scores 0.007
+  above the engines for the reason given above (a 960×1024 input against the export's square).
+  TensorRT's FP32 engine may compute in TF32, which is why FP16 can land slightly above it.
 
 ## ARM64 and the CI performance gate
 
@@ -191,8 +199,9 @@ Each of these silently produced wrong or misleading numbers before it was fixed:
   8-core job on a 96-core node it started about 120 threads and validation slowed tenfold. Its
   idle workers also spin between runs and starved the Python pre- and post-processing on the same
   cores (3 ms per image became up to 270 ms). ModelOpt's INT8 calibration for TensorRT runs
-  through ONNX Runtime on the CPU and hits the same oversubscription: 22 minutes per model while
-  the GPU waits.
+  through ONNX Runtime on the CPU and hits the same oversubscription, inside session options of
+  its own: an INT8 export took 33 minutes while the GPU waited, and 4 to 7 minutes once those
+  sessions were pinned to the job's cores too.
 - **ONNX Runtime's `CalibMaxIntermediateOutputs` discards data** (version 1.31). Meant to bound the
   min-max calibrator's memory, it clears each full chunk without computing its ranges: with a
   multiple of the chunk size nothing is left and calibration fails, with any other count it
