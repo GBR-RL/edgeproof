@@ -163,6 +163,24 @@ GPU_ROUTES = {("torch", "fp32"): "PyTorch FP32", ("torch", "int8-sim"): "PyTorch
               ("tensorrt", "int8"): "TensorRT INT8"}  # fmt: skip
 
 
+TRAININGS = ["baseline", "+10 epochs", "+10 epochs QAT"]
+
+
+def _gpu_ordered(rows: list[Row]) -> list[Row]:
+    """Grouped by baseline and head in order of appearance, then by training and route."""
+    first: dict[tuple[str, str], int] = {}
+    for r in rows:
+        first.setdefault((_training(r["model"])[0], r["head"]), len(first))
+    routes = list(GPU_ROUTES)
+
+    def rank(r: Row) -> tuple[int, int, int]:
+        model, training = _training(r["model"])
+        return (first[model, r["head"]], TRAININGS.index(training),
+                routes.index((r["runtime"], r["precision"])))  # fmt: skip
+
+    return sorted(rows, key=rank)
+
+
 def gpu_table(rows: list[Row]) -> str:
     """GPU rows, each against PyTorch FP32 of the same baseline and head."""
     base = {(r["model"], r["head"]): r for r in rows
@@ -172,7 +190,7 @@ def gpu_table(rows: list[Row]) -> str:
         "| mAP50-95 (vs PyTorch) | Mask mAP50 | Recall @ 1% false alarms | Size MB |",
         "|---|---|---|---|--:|--:|--:|--:|--:|--:|--:|--:|",
     ]
-    for r in rows:
+    for r in _gpu_ordered(rows):
         model, training = _training(r["model"])
         ref = base.get((model, r["head"]), {})
         route = GPU_ROUTES[r["runtime"], r["precision"]]
