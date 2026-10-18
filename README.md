@@ -16,6 +16,21 @@ The code picks a GPU automatically (CUDA or Apple MPS, else the CPU) and runs on
 were trained and the GPU numbers measured on one NVIDIA H100 of the RWTH CLAIX-2023 cluster; the
 CPU numbers come from a Xeon node of the same cluster and from GitHub's x86-64 and ARM64 runners.
 
+## What to deploy where
+
+YOLO26s detection at 1024 px, one image at a time, 4 threads on the CPUs; details and every
+other variant below.
+
+| Target | Route | p50 | mAP50 | Why |
+|---|---|--:|--:|---|
+| Xeon with AMX | OpenVINO BF16 | 30 ms | 0.412 | as fast as INT8, no calibration set; INT8 (31 ms, 0.415) if the model must be 3.6× smaller |
+| Other x86-64 CPUs | OpenVINO INT8 | 64 to 210 ms | 0.415 | ONNX Runtime INT8 only on CPUs with VNNI: without it, it scores 0.016 |
+| ARM64 (Neoverse-N2) | ONNX Runtime INT8, head in float | 145 ms | 0.397 | 2.4× over FP32; OpenVINO is nine times slower there |
+| NVIDIA H100 | TensorRT FP16 | 1.17 ms | 0.421 | 3.4× over PyTorch at FP32 accuracy; INT8 saves under 10% and costs mAP50 |
+
+On every target: keep the box decoding in float when quantizing (`--float-decode`), and prefer
+the NMS head where its post-processing is affordable (+0.02 mAP50, +6 points of recall).
+
 ## Setup
 
 - **Data.** [VisA](https://registry.opendata.aws/visa/) (12 industrial parts, CC BY 4.0), split
@@ -104,17 +119,18 @@ Every row, with mAP50-95, recall and engine sizes, is in
 [docs/results.md](docs/results.md#nvidia-h100).
 
 - **FP16 is the route on this GPU.** It runs 3.0 to 3.7× faster than PyTorch, within 0.001 mAP50
-  of PyTorch FP32, and the same holds for segmentation: mask mAP50 0.414 against 0.414 for YOLO26s-seg,
-  0.413 against 0.410 for YOLO11s-seg. At batch 1 INT8 saves at most 0.1 ms on top, under 10%.
+  of PyTorch FP32, and the same holds for segmentation: mask mAP50 0.414 against 0.414 for
+  YOLO26s-seg, 0.413 against 0.410 for YOLO11s-seg. At batch 1 INT8 saves at most 0.1 ms on
+  top, under 10%.
 - **INT8 after training costs more on TensorRT than on the CPU.** ModelOpt's calibration on 512
   training images loses 0.008 to 0.023 mAP50 against FP16, while NNCF's INT8 for OpenVINO loses
   nothing on the same YOLO26s.
 - **Quantization-aware training recovers that loss.** Against the fair control, PTQ of a model
   fine-tuned in float for the same 10 epochs, QAT gains 0.011 mAP50 on YOLO26s and 0.024 on
   YOLO11s, where it matches the FP32 engine (0.390). But its engines are slower than PTQ's of
-  the same model, and slower than FP16 (1.21 to 1.36 ms), and 1.5 to 1.8 times as large. QAT pays off
-  where INT8 is required, such as on a smaller accelerator without fast FP16; on the H100, FP16
-  is faster and more accurate.
+  the same model, and slower than FP16 (1.21 to 1.36 ms), and 1.5 to 1.8 times as large. QAT
+  pays off where INT8 is required, such as on a smaller accelerator without fast FP16; on the
+  H100, FP16 is faster and more accurate.
 - Recall at 1% false alarms moves more between INT8 engines than mAP50 (0.67 to 0.84 against
   0.75 to 0.84 in FP16); compare INT8 engines by mAP50. On the NMS-free head PyTorch scores 0.007
   above the engines for the reason given above (a 960×1024 input against the export's square).
