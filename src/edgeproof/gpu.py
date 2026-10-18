@@ -23,6 +23,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from edgeproof.bench import pinned, usable_cores
 from edgeproof.export import Head, artifact
 
 Precision = Literal["fp32", "fp16", "int8"]
@@ -54,10 +55,13 @@ def export_engine(
     calibration = {"data": str(data_yaml), "split": "train"} if ptq else {}
     from ultralytics import YOLO  # type: ignore[attr-defined,unused-ignore]
 
-    YOLO(str(source)).export(
-        format="engine", imgsz=imgsz, batch=1, dynamic=False, device=DEVICE,
-        nms=False if head == "e2e" else None, quantize=QUANTIZE[precision], **calibration,
-    )  # fmt: skip
+    # PTQ calibration runs through ONNX Runtime on the CPU, by default on a thread per core of
+    # the node instead of the job's cores.
+    with pinned(usable_cores()):
+        YOLO(str(source)).export(
+            format="engine", imgsz=imgsz, batch=1, dynamic=False, device=DEVICE,
+            nms=False if head == "e2e" else None, quantize=QUANTIZE[precision], **calibration,
+        )  # fmt: skip
     if not target.exists():
         raise FileNotFoundError(f"export did not produce {target}")
     return target

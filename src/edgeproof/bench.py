@@ -56,6 +56,9 @@ def pinned(threads: int, compute: Compute = "fp32") -> Iterator[None]:
             def ort_session(path: Any, sess_options: Any = None, *args: Any, **kwargs: Any) -> Any:
                 if sess_options is None:
                     sess_options = ort.SessionOptions()
+                # 0 is ONNX Runtime's default, a thread per core of the machine: also in the
+                # options that ModelOpt's calibration passes.
+                if sess_options.intra_op_num_threads == 0:
                     sess_options.intra_op_num_threads = threads
                     # Idle workers otherwise spin between runs and starve the pre- and
                     # post-processing, which share the same cores.

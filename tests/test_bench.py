@@ -48,9 +48,13 @@ def test_pinned_sets_threads_and_fp32(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_pinned_keeps_explicit_options_and_restores(monkeypatch: pytest.MonkeyPatch) -> None:
     ort, ov = _fake_runtimes(monkeypatch)
-    mine = _Options()
+    mine, default = _Options(), _Options()
+    mine.intra_op_num_threads = 2
     with pinned(8):
         assert ort.InferenceSession("m.onnx", mine) is mine
+        ort.InferenceSession("m.onnx", sess_options=default)
+    assert (mine.intra_op_num_threads, mine.config) == (2, {})
+    assert default.intra_op_num_threads == 8  # left at ONNX Runtime's default: pinned
     assert ort.InferenceSession("m.onnx") is None  # the original again
     assert ov.Core().compile_model("m.xml") is None
 
